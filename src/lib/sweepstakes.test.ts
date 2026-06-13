@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CATEGORY_POTS, DRAW_SEED, PARTICIPANTS, POT_TOTAL_DOLLARS } from "../data/config";
-import type { TeamLiveStat } from "../data/live";
 import { teams } from "../data/teams";
-import { applyFixtureCardsToStats, parseApiFootballCardEvents } from "../../api/red-card-cache";
 import { buildAssignments, assignmentsByParticipant, hydrateAssignments, serializeAssignments } from "./draw";
 import { computeTeamEvs } from "./ev";
 import { teamIdFromName } from "./teamAliases";
@@ -75,44 +73,5 @@ describe("provider team aliases", () => {
     expect(teamIdFromName("DR Congo")).toBe("congo-dr");
     expect(teamIdFromName("Türkiye")).toBe("turkiye");
     expect(teamIdFromName("Côte d'Ivoire")).toBe("cote-divoire");
-  });
-});
-
-describe("red-card event tracking", () => {
-  it("parses API-Football card events and applies fastest red-card minutes", () => {
-    const fixtureCards = parseApiFootballCardEvents(123, [
-      {
-        time: { elapsed: 45, extra: 2 },
-        team: { name: "USA" },
-        player: { name: "Test Player" },
-        type: "Card",
-        detail: "Red Card",
-      },
-      {
-        time: { elapsed: 68, extra: null },
-        team: { name: "Mexico" },
-        type: "Card",
-        detail: "Yellow Card",
-      },
-      {
-        time: { elapsed: 90, extra: 4 },
-        team: { name: "Mexico" },
-        type: "Card",
-        detail: "Yellow-Red Card",
-      },
-    ], true);
-    const stats = new Map<string, TeamLiveStat>([
-      ["united-states", { teamId: "united-states", played: 0, goalsFor: 0, goalsAgainst: 0, yellowCards: 0, redCards: 0, cleanSheets: 0, form: "-" }],
-      ["mexico", { teamId: "mexico", played: 0, goalsFor: 0, goalsAgainst: 0, yellowCards: 0, redCards: 0, cleanSheets: 0, form: "-" }],
-    ]);
-
-    applyFixtureCardsToStats(stats, [fixtureCards]);
-
-    expect(fixtureCards.events.map((event) => event.displayMinute)).toEqual(["45+2", "68", "90+4"]);
-    expect(stats.get("united-states")?.redCards).toBe(1);
-    expect(stats.get("united-states")?.redCardMinute).toBe(47);
-    expect(stats.get("mexico")?.yellowCards).toBe(1);
-    expect(stats.get("mexico")?.redCards).toBe(1);
-    expect(stats.get("mexico")?.redCardMinute).toBe(94);
   });
 });

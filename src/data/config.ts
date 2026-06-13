@@ -21,7 +21,7 @@ export const CATEGORY_POTS = {
   runnerUp: 30,
   biggestUpset: 40,
   fewestTotalGoals: 30,
-  fastestRedCard: 20,
+  biggestBlowout: 20,
 };
 
 export const CATEGORY_PERCENTAGES = {
@@ -29,7 +29,7 @@ export const CATEGORY_PERCENTAGES = {
   runnerUp: 0.15,
   biggestUpset: 0.2,
   fewestTotalGoals: 0.15,
-  fastestRedCard: 0.1,
+  biggestBlowout: 0.1,
 };
 
 export const DRAW_STORAGE_KEY = `bishop-sycamore-2026-draw:${DRAW_SEED}`;

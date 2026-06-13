@@ -2,17 +2,6 @@ import { completedResults as fallbackResults, liveStats as fallbackStats, type C
 import { teams } from "../src/data/teams.js";
 import { teamIdFromName } from "../src/lib/teamAliases.js";
 import { hasRedisConfig, parseJson, redisCommand } from "./server-cache.js";
-import {
-  applyFixtureCardsToStats,
-  canUseRedCardCache,
-  parseApiFootballCardEvents,
-  readFixtureCardCache,
-  readLastCheckedCache,
-  reserveEventFetchBudget,
-  writeFixtureCardCache,
-  type ApiFootballCardEvent,
-  type CachedFixtureCards,
-} from "./red-card-cache.js";
 
 type ApiFootballFixture = {
   fixture: {
@@ -34,7 +23,6 @@ type CachedFixtures = {
 const finishedStatuses = new Set(["FT", "AET", "PEN"]);
 const activeStatuses = new Set(["1H", "HT", "2H", "ET", "BT", "P", "SUSP", "INT", "LIVE"]);
 // 30-minute CDN cache keeps API-Football usage around 48 requests/day.
-// Card-event calls are separately cached in Upstash and budgeted per day.
 const cacheHeaders = { "Cache-Control": "s-maxage=1800, stale-while-revalidate=3600" };
 const fixturesCacheKey = "wc2026:api-football:fixtures:league-1:season-2026";
 const fixturesBudgetPrefix = "wc2026:api-football:fixtures-budget";
@@ -48,8 +36,6 @@ function emptyStats(): Map<string, TeamLiveStat> {
         played: 0,
         goalsFor: 0,
         goalsAgainst: 0,
-        yellowCards: 0,
-        redCards: 0,
         cleanSheets: 0,
         form: "-",
       },
@@ -134,81 +120,6 @@ function applyManualOverrides(stats: Map<string, TeamLiveStat>) {
   }
 }
 
-function eventCheckIntervalMs() {
-  const minutes = Number(process.env.RED_CARD_EVENT_CHECK_MINUTES || 30);
-  return Math.max(15, minutes) * 60 * 1000;
-}
-
-async function fetchFixtureCards(
-  fixture: ApiFootballFixture,
-  apiKey: string,
-  finalized: boolean,
-): Promise<CachedFixtureCards | undefined> {
-  const fixtureId = fixture.fixture.id;
-  const hasBudget = await reserveEventFetchBudget();
-  if (!hasBudget) return undefined;
-
-  const payload = await apiFootball<{ response: ApiFootballCardEvent[] }>(`/fixtures/events?fixture=${fixtureId}&type=Card`, apiKey);
-  const cache = parseApiFootballCardEvents(fixtureId, payload.response || [], finalized);
-  await writeFixtureCardCache(cache);
-  return cache;
-}
-
-async function getFixtureCards(fixtures: ApiFootballFixture[], apiKey: string) {
-  if (!canUseRedCardCache()) return [];
-
-  const fixtureIds = fixtures.map((fixture) => fixture.fixture.id);
-  const activeFixtureIds = fixtures
-    .filter((fixture) => activeStatuses.has(fixture.fixture.status.short))
-    .map((fixture) => fixture.fixture.id);
-  let cachedCards: Map<number, CachedFixtureCards>;
-  let lastChecked: Map<number, number>;
-
-  try {
-    [cachedCards, lastChecked] = await Promise.all([
-      readFixtureCardCache(fixtureIds),
-      readLastCheckedCache(activeFixtureIds),
-    ]);
-  } catch {
-    return [];
-  }
-  const now = Date.now();
-  const interval = eventCheckIntervalMs();
-  const fetched: CachedFixtureCards[] = [];
-
-  const fixturesNeedingRefresh = fixtures
-    .filter((fixture) => {
-      const status = fixture.fixture.status.short;
-      const fixtureId = fixture.fixture.id;
-      const cached = cachedCards.get(fixtureId);
-      if (cached?.finalized) return false;
-      if (finishedStatuses.has(status)) return true;
-      if (!activeStatuses.has(status)) return false;
-
-      const checkedAt = lastChecked.get(fixtureId);
-      return !checkedAt || now - checkedAt >= interval;
-    })
-    .sort((a, b) => {
-      const aActive = activeStatuses.has(a.fixture.status.short);
-      const bActive = activeStatuses.has(b.fixture.status.short);
-      return Number(bActive) - Number(aActive);
-    });
-
-  for (const fixture of fixturesNeedingRefresh) {
-    try {
-      const cache = await fetchFixtureCards(fixture, apiKey, finishedStatuses.has(fixture.fixture.status.short));
-      if (cache) {
-        cachedCards.set(fixture.fixture.id, cache);
-        fetched.push(cache);
-      }
-    } catch {
-      // Keep existing cached card data and avoid making live-state brittle.
-    }
-  }
-
-  return Array.from(new Map([...cachedCards, ...fetched.map((cache) => [cache.fixtureId, cache] as const)]).values());
-}
-
 export async function GET(): Promise<Response> {
   const apiKey = process.env.API_FOOTBALL_KEY;
 
@@ -218,7 +129,7 @@ export async function GET(): Promise<Response> {
       results: fallbackResults,
       source: "Static fallback",
       updatedAt: new Date().toISOString(),
-      warning: "Set API_FOOTBALL_KEY to enable real scores, results, and goals. Add Upstash Redis REST env vars to track red cards automatically.",
+      warning: "Set API_FOOTBALL_KEY to enable real scores, results, and goals.",
     }, { headers: cacheHeaders });
   }
 
@@ -269,8 +180,6 @@ export async function GET(): Promise<Response> {
 
     });
 
-    const fixtureCards = await getFixtureCards(relevantFixtures, apiKey);
-    applyFixtureCardsToStats(stats, fixtureCards);
     applyManualOverrides(stats);
 
     return Response.json({
@@ -278,7 +187,6 @@ export async function GET(): Promise<Response> {
       results,
       source: "API-Football",
       updatedAt: new Date().toISOString(),
-      warning: canUseRedCardCache() ? undefined : "Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN to enable automatic red-card event tracking.",
     }, { headers: cacheHeaders });
   } catch (error) {
     return Response.json({

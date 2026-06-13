@@ -24,7 +24,7 @@ The app is configured for exactly 48 teams and 10 people. Eight people receive f
 - 15% / $30 to runner up
 - 20% / $40 to biggest upset by FIFA ranking gap
 - 15% / $30 to fewest total goals
-- 10% / $20 to fastest red card
+- 10% / $20 to biggest blowout by final-score margin
 
 Before the draw, the assignment ledger is sealed behind `/api/draw`; the browser does not precompute assignments. Once the draw starts, the server returns the ledger and the browser saves it in `localStorage`.
 
@@ -35,22 +35,15 @@ The UI uses static fallback data when keys are missing. The production setup is 
 1. Copy `.env.example` into your Vercel or Netlify environment variables.
 2. Set `API_FOOTBALL_KEY` for live World Cup scores, goals, and match results.
 3. Set `ODDS_PROVIDER=the-odds-api` plus `THE_ODDS_API_KEY` for futures/outright odds.
-4. Create a free Upstash Redis database and set `UPSTASH_REDIS_REST_URL` plus `UPSTASH_REDIS_REST_TOKEN` for automatic fastest red-card tracking.
+4. Create a free Upstash Redis database and set `UPSTASH_REDIS_REST_URL` plus `UPSTASH_REDIS_REST_TOKEN` for server-side caching and API budget guards.
 5. Set `DRAW_SEED_SECRET` as a long random server-only value before the draw.
 
-`api/live-state.ts` fetches API-Football `league=1&season=2026` fixtures and caches successful responses in Upstash for 30 minutes. `API_FOOTBALL_FIXTURE_DAILY_LIMIT=55` keeps the main fixtures feed under the free 100 requests/day plan even if CDN caching is not doing much.
+`api/live-state.ts` fetches API-Football `league=1&season=2026` fixtures and caches successful responses in Upstash for 30 minutes. `API_FOOTBALL_FIXTURE_DAILY_LIMIT=55` keeps the fixtures feed under the free 100 requests/day plan even if CDN caching is not doing much.
 
-For fastest red card, the server uses API-Football `/fixtures/events?fixture=...&type=Card` only when Upstash is configured:
-
-- live fixtures are checked at most every 30 minutes by default.
-- finished fixtures are checked once, saved in Redis, and never re-fetched.
-- `RED_CARD_EVENT_DAILY_LIMIT=35` keeps card-event calls inside the free API-Football tier alongside the fixtures poll. The default combined API-Football ceiling is 55 fixture refreshes plus 35 card-event refreshes per day.
-- if Upstash is missing or unavailable, the site still serves scores and odds; card tracking just falls back to manual overrides.
-
-Use a tiny manual override only if a provider has a bad event:
+Use a tiny manual override only if a provider has a bad team total:
 
 ```bash
-LIVE_STAT_OVERRIDES_JSON='[{"teamId":"paraguay","redCards":1,"redCardMinute":68,"yellowCards":4}]'
+LIVE_STAT_OVERRIDES_JSON='[{"teamId":"united-states","played":1,"goalsFor":4,"goalsAgainst":1,"cleanSheets":0,"form":"W"}]'
 ```
 
 `api/market-odds.ts` uses The Odds API free tier and caches successful odds snapshots in Upstash for 6 hours. With the default one-region, one-market request, that is roughly 4 provider credits/day and about 120/month. `ODDS_API_MONTHLY_LIMIT=450` adds a hard guard under the 500-credit/month free plan. If The Odds API is down, over budget, or missing the World Cup outrights market, the app serves the last cached snapshot; if there is no cache yet, it serves static fallback odds. It normalizes futures/outright odds into probability percentages and removes bookmaker overround within each book before averaging.

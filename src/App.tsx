@@ -10,7 +10,6 @@ import {
   Medal,
   Moon,
   Radio,
-  ShieldAlert,
   Sparkles,
   Sun,
   Target,
@@ -46,7 +45,7 @@ const categoryLabels: Record<keyof typeof CATEGORY_POTS, string> = {
   runnerUp: "Runner up",
   biggestUpset: "Biggest upset",
   fewestTotalGoals: "Fewest total goals",
-  fastestRedCard: "Fastest red card",
+  biggestBlowout: "Biggest blowout",
 };
 
 function Flag({ team, large = false }: { team: Team; large?: boolean }) {
@@ -100,6 +99,16 @@ function formatUpdatedAt(value: string) {
 
 function formatPercent(value: number) {
   return `${(value * 100).toFixed(value >= 0.1 ? 1 : 2)}%`;
+}
+
+function formatMarketSource(updatedAt: string) {
+  return `Market odds · ${formatUpdatedAt(updatedAt)}`;
+}
+
+function scoreMargin(score: string) {
+  const [winnerGoals, loserGoals] = score.split("-").map((part) => Number(part.trim()));
+  if (!Number.isFinite(winnerGoals) || !Number.isFinite(loserGoals)) return 0;
+  return Math.max(0, winnerGoals - loserGoals);
 }
 
 function AppHeader({
@@ -237,6 +246,7 @@ function LeadersTab({
   completedResults,
   liveSource,
   liveUpdatedAt,
+  evs,
 }: {
   assignments: Assignment[];
   drawStarted: boolean;
@@ -245,19 +255,20 @@ function LeadersTab({
   completedResults: CompletedResult[];
   liveSource: string;
   liveUpdatedAt: string;
+  evs: TeamEv[];
 }) {
   const assignmentByTeam = new Map(assignments.map((assignment) => [assignment.team.id, assignment]));
+  const evByTeam = new Map(evs.map((ev) => [ev.teamId, ev]));
+  const teamsWithEv = teams
+    .map((team) => ({ team, ev: evByTeam.get(team.id) }))
+    .filter((entry): entry is { team: Team; ev: TeamEv } => Boolean(entry.ev));
   const withTeams = liveStats
     .map((stat) => ({ stat, team: teamById.get(stat.teamId) }))
     .filter((entry): entry is { stat: (typeof liveStats)[number]; team: Team } => Boolean(entry.team));
   const marketBoard = [...marketOdds].sort((a, b) => b.probability - a.probability);
   const favorite = marketBoard[0] || fallbackMarketOdds[0];
-  const runnerUpProjection = marketBoard[1] || fallbackMarketOdds[1] || favorite;
   const favoriteTeam = teamById.get(favorite.teamId)!;
-  const runnerUpTeam = teamById.get(runnerUpProjection.teamId)!;
-  const fastestRed = withTeams
-    .filter(({ stat }) => typeof stat.redCardMinute === "number")
-    .sort((a, b) => (a.stat.redCardMinute || 999) - (b.stat.redCardMinute || 999))[0];
+  const runnerUpProjection = [...teamsWithEv].sort((a, b) => b.ev.probabilities.runnerUp - a.ev.probabilities.runnerUp)[0];
   const leastGoals = withTeams.filter(({ stat }) => stat.played > 0).sort((a, b) => a.stat.goalsFor - b.stat.goalsFor)[0];
   const biggestUpset = completedResults
     .map((result) => {
@@ -268,6 +279,107 @@ function LeadersTab({
     })
     .filter((result): result is NonNullable<typeof result> => Boolean(result))
     .sort((a, b) => b.gap - a.gap)[0];
+  const biggestUpsetRows = completedResults
+    .map((result) => {
+      const winner = teamById.get(result.winnerId);
+      const loser = teamById.get(result.loserId);
+      if (!winner || !loser || winner.fifaRank <= loser.fifaRank) return undefined;
+      return { result, winner, loser, gap: winner.fifaRank - loser.fifaRank };
+    })
+    .filter((result): result is NonNullable<typeof result> => Boolean(result))
+    .sort((a, b) => b.gap - a.gap);
+  const biggestBlowoutRows = completedResults
+    .map((result) => {
+      const winner = teamById.get(result.winnerId);
+      const loser = teamById.get(result.loserId);
+      const margin = scoreMargin(result.score);
+      if (!winner || !loser || margin <= 0) return undefined;
+      return { result, winner, loser, margin };
+    })
+    .filter((result): result is NonNullable<typeof result> => Boolean(result))
+    .sort((a, b) => b.margin - a.margin || a.winner.name.localeCompare(b.winner.name));
+  const biggestBlowout = biggestBlowoutRows[0];
+  const winnerRows = marketBoard.slice(0, 5).map((odd, index) => {
+    const team = teamById.get(odd.teamId);
+    if (!team) return undefined;
+    return {
+      key: odd.teamId,
+      rank: index + 1,
+      team,
+      primary: formatPercent(odd.probability),
+      detail: "win",
+    };
+  });
+  const runnerUpRows = [...teamsWithEv]
+    .sort((a, b) => b.ev.probabilities.runnerUp - a.ev.probabilities.runnerUp)
+    .slice(0, 5)
+    .map(({ team, ev }, index) => ({
+      key: team.id,
+      rank: index + 1,
+      team,
+      primary: formatPercent(ev.probabilities.runnerUp),
+      detail: "runner up",
+    }));
+  const upsetRows = [
+    ...biggestUpsetRows.slice(0, 5).map((result, index) => ({
+      key: `${result.winner.id}-${result.loser.id}`,
+      rank: index + 1,
+      team: result.winner,
+      primary: `+${result.gap}`,
+      detail: `beat ${result.loser.name}`,
+    })),
+    ...[...teamsWithEv]
+      .filter(({ team }) => !biggestUpsetRows.some((row) => row.winner.id === team.id))
+      .sort((a, b) => b.ev.probabilities.biggestUpset - a.ev.probabilities.biggestUpset)
+      .slice(0, 5)
+      .map(({ team, ev }, index) => ({
+        key: `model-${team.id}`,
+        rank: biggestUpsetRows.length + index + 1,
+        team,
+        primary: formatPercent(ev.probabilities.biggestUpset),
+        detail: `rank ${team.fifaRank}`,
+      })),
+  ].slice(0, 5);
+  const fewestGoalRows = leastGoals
+    ? [...withTeams]
+        .filter(({ stat }) => stat.played > 0)
+        .sort((a, b) => a.stat.goalsFor - b.stat.goalsFor || b.stat.played - a.stat.played || a.team.name.localeCompare(b.team.name))
+        .slice(0, 5)
+        .map(({ team, stat }, index) => ({
+          key: team.id,
+          rank: index + 1,
+          team,
+          primary: `${stat.goalsFor}`,
+          detail: `${stat.played} MP`,
+        }))
+    : [...teamsWithEv]
+        .sort((a, b) => b.ev.probabilities.fewestTotalGoals - a.ev.probabilities.fewestTotalGoals)
+        .slice(0, 5)
+        .map(({ team, ev }, index) => ({
+          key: team.id,
+          rank: index + 1,
+          team,
+          primary: formatPercent(ev.probabilities.fewestTotalGoals),
+          detail: "low goals",
+        }));
+  const blowoutRows = biggestBlowout
+    ? biggestBlowoutRows.slice(0, 5).map((result, index) => ({
+        key: `${result.winner.id}-${result.loser.id}`,
+        rank: index + 1,
+        team: result.winner,
+        primary: `+${result.margin}`,
+        detail: `${result.result.score} vs ${result.loser.name}`,
+      }))
+    : [...teamsWithEv]
+      .sort((a, b) => b.team.attack + b.team.power - (a.team.attack + a.team.power))
+      .slice(0, 5)
+      .map(({ team }, index) => ({
+        key: team.id,
+        rank: index + 1,
+        team,
+        primary: `${team.attack}`,
+        detail: "attack",
+      }));
 
   const rows = [
     {
@@ -275,34 +387,49 @@ function LeadersTab({
       detail: `$${CATEGORY_POTS.champion} to the champion. ${Math.round(favorite.probability * 1000) / 10}% market lead.`,
       icon: <Trophy size={20} />,
       team: favoriteTeam,
+      source: formatMarketSource(favorite.updatedAt),
+      rankings: winnerRows,
     },
     {
       title: "Runner up",
-      detail: `$${CATEGORY_POTS.runnerUp} to second place. Projection follows market board.`,
+      detail: `$${CATEGORY_POTS.runnerUp} to second place. Projection follows the pool model.`,
       icon: <Medal size={20} />,
-      team: runnerUpTeam,
+      team: runnerUpProjection?.team,
+      source: "Projected from team ratings",
+      rankings: runnerUpRows,
     },
     {
       title: "Biggest upset",
       detail: biggestUpset
         ? `${biggestUpset.score}, FIFA rank gap ${biggestUpset.gap}`
-        : `$${CATEGORY_POTS.biggestUpset}; no lower-ranked winner yet`,
+        : `$${CATEGORY_POTS.biggestUpset}; projected leaders until an upset lands`,
       icon: <Target size={20} />,
-      team: biggestUpset?.winner,
+      team: biggestUpset?.winner || upsetRows[0]?.team,
+      source: biggestUpset ? `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}` : "Projected from team ratings",
+      rankings: upsetRows,
     },
     {
       title: "Fewest total goals",
-      detail: leastGoals ? `$${CATEGORY_POTS.fewestTotalGoals}; ${leastGoals.stat.goalsFor} goals through ${leastGoals.stat.played}` : "Waiting on first match",
-      icon: <Flame size={20} />,
-      team: leastGoals?.team,
+      detail: leastGoals ? `$${CATEGORY_POTS.fewestTotalGoals}; ${leastGoals.stat.goalsFor} goals through ${leastGoals.stat.played}` : "Projected low-scoring leaders until matches post",
+      icon: <Database size={20} />,
+      team: leastGoals?.team || fewestGoalRows[0]?.team,
+      source: leastGoals ? `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}` : "Projected from team ratings",
+      rankings: fewestGoalRows,
     },
     {
-      title: "Fastest red card",
-      detail: fastestRed ? `$${CATEGORY_POTS.fastestRedCard}; ${fastestRed.stat.redCardMinute}' red card` : "No red cards yet",
-      icon: <ShieldAlert size={20} />,
-      team: fastestRed?.team,
+      title: "Biggest blowout",
+      detail: biggestBlowout
+        ? `${biggestBlowout.result.score}, ${biggestBlowout.margin}-goal margin over ${biggestBlowout.loser.name}`
+        : "Projected blowout leaders until final-score margins post",
+      icon: <Flame size={20} />,
+      team: biggestBlowout?.winner || blowoutRows[0]?.team,
+      source: biggestBlowout ? `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}` : "Projected from attack ratings",
+      rankings: blowoutRows,
     },
-  ];
+  ].map((board) => ({
+    ...board,
+    rankings: board.rankings.filter((row): row is NonNullable<typeof row> => Boolean(row)),
+  }));
 
   return (
     <>
@@ -326,70 +453,24 @@ function LeadersTab({
               ) : (
                 <span className="muted">Managers unlock at draw</span>
               )}
+              <div className="cardRankings" aria-label={`${row.title} top five`}>
+                <span className="cardRankingsSource">{row.source}</span>
+                {row.rankings.map((ranking) => (
+                  <div className="cardRankingRow" key={ranking.key}>
+                    <span>{ranking.rank}</span>
+                    <div>
+                      <Flag team={ranking.team} />
+                      <strong>{ranking.team.name}</strong>
+                      {drawStarted && assignmentByTeam.get(ranking.team.id) && <small>{assignmentByTeam.get(ranking.team.id)?.participant}</small>}
+                    </div>
+                    <b>{ranking.primary}</b>
+                    <em>{ranking.detail}</em>
+                  </div>
+                ))}
+              </div>
             </div>
           </article>
         ))}
-      </div>
-
-      <div className="dataGrid">
-        <article className="feedCard">
-          <div className="dataCardHeader">
-            <p className="eyebrow">Odds feed</p>
-            <h3>Market board</h3>
-            <span>{favorite.source} · {formatUpdatedAt(favorite.updatedAt)}</span>
-          </div>
-          <div className="oddsBoard" aria-label="World Cup outright odds">
-            {marketBoard.slice(0, 8).map((odd, index) => {
-              const team = teamById.get(odd.teamId);
-              if (!team) return null;
-
-              return (
-                <div className="oddsRow" key={odd.teamId}>
-                  <span>{index + 1}</span>
-                  <div>
-                    <Flag team={team} />
-                    <strong>{team.name}</strong>
-                  </div>
-                  <b>{(odd.probability * 100).toFixed(1)}%</b>
-                </div>
-              );
-            })}
-          </div>
-        </article>
-
-        <article className="tableCard">
-          <div className="dataCardHeader">
-            <p className="eyebrow">Live feed</p>
-            <h3>Quick form</h3>
-            <span>
-              {liveSource} · {formatUpdatedAt(liveUpdatedAt)}
-            </span>
-          </div>
-          <div className="formTable">
-            <div className="formRow formHead">
-              <span>Team</span>
-              <span>MP</span>
-              <span>GF</span>
-              <span>GA</span>
-              <span>Cards</span>
-              <span>Form</span>
-            </div>
-            {withTeams.slice(0, 10).map(({ team, stat }) => (
-              <div className="formRow" key={team.id}>
-                <div className="formTeam">
-                  <Flag team={team} />
-                  <span>{team.name}</span>
-                  {drawStarted && assignmentByTeam.get(team.id) && <b>{assignmentByTeam.get(team.id)?.participant}</b>}
-                </div>
-                <span>{stat.played}</span>
-                <span>{stat.goalsFor}</span>
-                <span>{stat.goalsAgainst}</span>
-                <span>{stat.yellowCards + stat.redCards}</span>
-                <span>{stat.form}</span>
-              </div>
-            ))}
-          </div>
-        </article>
       </div>
     </>
   );
@@ -512,7 +593,7 @@ function NerdStats({
     { label: "Runner up", formula: "softmax(exp((power - 52) / 15) x (1.08 - P(win)))" },
     { label: "Upset", formula: "softmax(exp((rank - 25) / 22) x exp((power - 42) / 24))" },
     { label: "Fewest goals", formula: "softmax(exp((58 - attack) / 12) x (1.12 - power / 120))" },
-    { label: "Fastest red", formula: "softmax(exp((disciplineRisk - 35) / 14))" },
+    { label: "Blowout", formula: "softmax(exp((attack + power - 130) / 18))" },
   ];
   const ownerTotals = PARTICIPANTS.map((participant) => {
     const owned = assignments.filter((assignment) => assignment.participant === participant);
@@ -624,7 +705,7 @@ function NerdStats({
               <span>
                 {team.name}
                 <small>
-                  W ${ev.categoryEv.champion.toFixed(1)} · RU ${ev.categoryEv.runnerUp.toFixed(1)} · Upset ${ev.categoryEv.biggestUpset.toFixed(1)} · Low goals ${ev.categoryEv.fewestTotalGoals.toFixed(1)} · Red ${ev.categoryEv.fastestRedCard.toFixed(1)}
+                  W ${ev.categoryEv.champion.toFixed(1)} · RU ${ev.categoryEv.runnerUp.toFixed(1)} · Upset ${ev.categoryEv.biggestUpset.toFixed(1)} · Low goals ${ev.categoryEv.fewestTotalGoals.toFixed(1)} · Blowout ${ev.categoryEv.biggestBlowout.toFixed(1)}
                 </small>
               </span>
               <b>${ev.total.toFixed(1)}</b>
@@ -816,6 +897,7 @@ export function App() {
             completedResults={liveState.results}
             liveSource={liveState.source}
             liveUpdatedAt={liveState.updatedAt}
+            evs={evs}
           />
         )}
         {activeTab === "owners" && <OwnersTab assignments={drawStarted ? assignments : revealed} />}

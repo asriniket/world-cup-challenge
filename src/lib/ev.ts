@@ -22,7 +22,7 @@ export function computeTeamEvs(teams: Team[]): TeamEv[] {
     (team) => Math.exp(((team.fifaRank || 75) - 25) / 22) * Math.exp((team.power - 42) / 24),
   );
   const fewestTotalGoals = normalize(teams, (team) => Math.exp((58 - team.attack) / 12) * (1.12 - team.power / 120));
-  const fastestRedCard = normalize(teams, (team) => Math.exp((team.disciplineRisk - 35) / 14));
+  const biggestBlowout = normalize(teams, (team) => Math.exp((team.attack + team.power - 130) / 18));
 
   return teams.map((team) => {
     const probabilities = {
@@ -30,7 +30,7 @@ export function computeTeamEvs(teams: Team[]): TeamEv[] {
       runnerUp: runnerUp.get(team.id) || 0,
       biggestUpset: biggestUpset.get(team.id) || 0,
       fewestTotalGoals: fewestTotalGoals.get(team.id) || 0,
-      fastestRedCard: fastestRedCard.get(team.id) || 0,
+      biggestBlowout: biggestBlowout.get(team.id) || 0,
     };
 
     const categoryEv = Object.fromEntries(
