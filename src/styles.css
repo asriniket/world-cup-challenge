@@ -199,6 +199,14 @@ h3 {
   padding: 14px clamp(16px, 4vw, 56px) 22px;
 }
 
+.drawBand.drawComplete {
+  grid-template-columns: 1fr;
+}
+
+.drawBand.drawComplete .drawCopy {
+  min-height: 260px;
+}
+
 .drawCopy {
   display: flex;
   flex-direction: column;

@@ -181,7 +181,7 @@ function DrawStage({
   revealed: Assignment[];
 }) {
   return (
-    <section className="drawBand">
+    <section className={drawComplete ? "drawBand drawComplete" : "drawBand"}>
       <div className="drawCopy">
         <p className="eyebrow">Scheduled draw</p>
         <h2>Bishop Sycamore 2026 WC Sweepstakes</h2>
@@ -194,36 +194,38 @@ function DrawStage({
         </p>
       </div>
 
-      <div className={`packStage ${drawStarted && !drawComplete ? "isOpening" : ""}`}>
-        {!drawStarted && (
-          <div className="sealedPack">
-            <Sparkles size={30} />
-            <strong>{countdown}</strong>
-            <span>until pack one</span>
-          </div>
-        )}
-
-        {drawLoading && (
-          <div className="sealedPack">
-            <Sparkles size={30} />
-            <strong>Loading</strong>
-            <span>opening the server ledger</span>
-          </div>
-        )}
-
-        {drawStarted && currentPick && (
-          <div className="countryCard">
-            <div className="pickNumber">Pick {currentPick.pickNumber}</div>
-            <Flag team={currentPick.team} large />
-            <h3>{currentPick.team.name}</h3>
-            <div className="assignedTo">
-              <span>goes to</span>
-              <strong>{currentPick.participant}</strong>
+      {!drawComplete && (
+        <div className={`packStage ${drawStarted ? "isOpening" : ""}`}>
+          {!drawStarted && (
+            <div className="sealedPack">
+              <Sparkles size={30} />
+              <strong>{countdown}</strong>
+              <span>until pack one</span>
             </div>
-            <div className="tierBadge">Tier {currentPick.team.tier}</div>
-          </div>
-        )}
-      </div>
+          )}
+
+          {drawLoading && (
+            <div className="sealedPack">
+              <Sparkles size={30} />
+              <strong>Loading</strong>
+              <span>opening the server ledger</span>
+            </div>
+          )}
+
+          {drawStarted && currentPick && (
+            <div className="countryCard">
+              <div className="pickNumber">Pick {currentPick.pickNumber}</div>
+              <Flag team={currentPick.team} large />
+              <h3>{currentPick.team.name}</h3>
+              <div className="assignedTo">
+                <span>goes to</span>
+                <strong>{currentPick.participant}</strong>
+              </div>
+              <div className="tierBadge">Tier {currentPick.team.tier}</div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="revealStrip" aria-label="Recently revealed teams">
         {revealed.slice(-10).map((assignment) => (
@@ -395,7 +397,7 @@ function LeadersTab({
       detail: `$${CATEGORY_POTS.runnerUp} to second place. Projection follows the pool model.`,
       icon: <Medal size={20} />,
       team: runnerUpProjection?.team,
-      source: "Projected from team ratings",
+      source: "Pre-tournament estimate",
       rankings: runnerUpRows,
     },
     {
@@ -405,7 +407,7 @@ function LeadersTab({
         : `$${CATEGORY_POTS.biggestUpset}; projected leaders until an upset lands`,
       icon: <Target size={20} />,
       team: biggestUpset?.winner || upsetRows[0]?.team,
-      source: biggestUpset ? `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}` : "Projected from team ratings",
+      source: biggestUpset ? `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}` : "Pre-tournament estimate",
       rankings: upsetRows,
     },
     {
@@ -413,7 +415,7 @@ function LeadersTab({
       detail: leastGoals ? `$${CATEGORY_POTS.fewestTotalGoals}; ${leastGoals.stat.goalsFor} goals through ${leastGoals.stat.played}` : "Projected low-scoring leaders until matches post",
       icon: <Database size={20} />,
       team: leastGoals?.team || fewestGoalRows[0]?.team,
-      source: leastGoals ? `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}` : "Projected from team ratings",
+      source: leastGoals ? `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}` : "Pre-tournament estimate",
       rankings: fewestGoalRows,
     },
     {
@@ -423,7 +425,7 @@ function LeadersTab({
         : "Projected blowout leaders until final-score margins post",
       icon: <Flame size={20} />,
       team: biggestBlowout?.winner || blowoutRows[0]?.team,
-      source: biggestBlowout ? `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}` : "Projected from attack ratings",
+      source: biggestBlowout ? `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}` : "Pre-tournament attack estimate",
       rankings: blowoutRows,
     },
   ].map((board) => ({
