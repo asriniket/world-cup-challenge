@@ -1,7 +1,7 @@
-import { DRAW_SEED, DRAW_START_ISO, PARTICIPANTS } from "../src/data/config";
-import { teams } from "../src/data/teams";
-import { buildAssignments, serializeAssignments } from "../src/lib/draw";
-import { computeTeamEvs } from "../src/lib/ev";
+import { DRAW_SEED, DRAW_START_ISO, PARTICIPANTS } from "../src/data/config.js";
+import { teams } from "../src/data/teams.js";
+import { buildAssignments, serializeAssignments } from "../src/lib/draw.js";
+import { computeTeamEvs } from "../src/lib/ev.js";
 
 const cacheHeaders = { "Cache-Control": "no-store" };
 

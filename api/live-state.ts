@@ -1,7 +1,7 @@
-import { completedResults as fallbackResults, liveStats as fallbackStats, type CompletedResult, type TeamLiveStat } from "../src/data/live";
-import { teams } from "../src/data/teams";
-import { teamIdFromName } from "../src/lib/teamAliases";
-import { hasRedisConfig, parseJson, redisCommand } from "./server-cache";
+import { completedResults as fallbackResults, liveStats as fallbackStats, type CompletedResult, type TeamLiveStat } from "../src/data/live.js";
+import { teams } from "../src/data/teams.js";
+import { teamIdFromName } from "../src/lib/teamAliases.js";
+import { hasRedisConfig, parseJson, redisCommand } from "./server-cache.js";
 import {
   applyFixtureCardsToStats,
   canUseRedCardCache,
@@ -12,7 +12,7 @@ import {
   writeFixtureCardCache,
   type ApiFootballCardEvent,
   type CachedFixtureCards,
-} from "./red-card-cache";
+} from "./red-card-cache.js";
 
 type ApiFootballFixture = {
   fixture: {

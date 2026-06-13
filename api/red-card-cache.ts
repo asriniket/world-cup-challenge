@@ -1,6 +1,6 @@
-import type { TeamLiveStat } from "../src/data/live";
-import { teamIdFromName } from "../src/lib/teamAliases";
-import { hasRedisConfig, parseJson, redisCommand } from "./server-cache";
+import type { TeamLiveStat } from "../src/data/live.js";
+import { teamIdFromName } from "../src/lib/teamAliases.js";
+import { hasRedisConfig, parseJson, redisCommand } from "./server-cache.js";
 
 export type ApiFootballCardEvent = {
   time: { elapsed: number | null; extra: number | null };

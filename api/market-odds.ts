@@ -1,5 +1,5 @@
-import { teamIdFromName } from "../src/lib/teamAliases";
-import { hasRedisConfig, parseJson, redisCommand } from "./server-cache";
+import { teamIdFromName } from "../src/lib/teamAliases.js";
+import { hasRedisConfig, parseJson, redisCommand } from "./server-cache.js";
 
 type MarketOdd = {
   teamId: string;

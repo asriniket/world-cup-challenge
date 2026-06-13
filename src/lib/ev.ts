@@ -1,5 +1,5 @@
-import { CATEGORY_POTS } from "../data/config";
-import type { Team } from "../data/teams";
+import { CATEGORY_POTS } from "../data/config.js";
+import type { Team } from "../data/teams.js";
 
 export type TeamEv = {
   teamId: string;
