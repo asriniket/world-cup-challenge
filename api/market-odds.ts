@@ -169,7 +169,7 @@ async function fetchGeneric(): Promise<MarketOdd[]> {
   return data.odds?.length ? data.odds : [];
 }
 
-export default async function handler(): Promise<Response> {
+export async function GET(): Promise<Response> {
   const provider = process.env.ODDS_PROVIDER || "the-odds-api";
   const cacheKey = providerCacheKey(provider);
   const cached = await readOddsCache(cacheKey).catch(() => undefined);

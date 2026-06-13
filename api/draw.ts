@@ -5,7 +5,7 @@ import { computeTeamEvs } from "../src/lib/ev.js";
 
 const cacheHeaders = { "Cache-Control": "no-store" };
 
-export default async function handler(): Promise<Response> {
+export async function GET(): Promise<Response> {
   const drawStart = new Date(DRAW_START_ISO).getTime();
   const now = Date.now();
 

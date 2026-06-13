@@ -209,7 +209,7 @@ async function getFixtureCards(fixtures: ApiFootballFixture[], apiKey: string) {
   return Array.from(new Map([...cachedCards, ...fetched.map((cache) => [cache.fixtureId, cache] as const)]).values());
 }
 
-export default async function handler(): Promise<Response> {
+export async function GET(): Promise<Response> {
   const apiKey = process.env.API_FOOTBALL_KEY;
 
   if (!apiKey) {

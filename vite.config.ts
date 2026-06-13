@@ -5,7 +5,8 @@ function installApiRoute(server: ViteDevServer, path: string, modulePath: string
   server.middlewares.use(path, async (_request, response) => {
     try {
       const module = await server.ssrLoadModule(modulePath);
-      const result = (await module.default()) as Response;
+      const handler = module.GET ?? module.default;
+      const result = (await handler()) as Response;
       response.statusCode = result.status;
       result.headers.forEach((value, key) => response.setHeader(key, value));
       response.end(Buffer.from(await result.arrayBuffer()));
