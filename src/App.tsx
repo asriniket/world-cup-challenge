@@ -227,15 +227,17 @@ function DrawStage({
         </div>
       )}
 
-      <div className="revealStrip" aria-label="Recently revealed teams">
-        {revealed.slice(-10).map((assignment) => (
-          <div className="miniReveal" key={assignment.team.id}>
-            <Flag team={assignment.team} />
-            <span>{assignment.team.name}</span>
-            <strong>{assignment.participant}</strong>
-          </div>
-        ))}
-      </div>
+      {!drawComplete && (
+        <div className="revealStrip" aria-label="Recently revealed teams">
+          {revealed.slice(-10).map((assignment) => (
+            <div className="miniReveal" key={assignment.team.id}>
+              <Flag team={assignment.team} />
+              <span>{assignment.team.name}</span>
+              <strong>{assignment.participant}</strong>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
