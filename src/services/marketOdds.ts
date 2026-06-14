@@ -5,28 +5,40 @@ export type MarketOdd = {
   updatedAt: string;
 };
 
-export const fallbackMarketOdds: MarketOdd[] = [
-  { teamId: "france", probability: 0.15, source: "Static fallback", updatedAt: "2026-06-13T12:00:00-05:00" },
-  { teamId: "argentina", probability: 0.13, source: "Static fallback", updatedAt: "2026-06-13T12:00:00-05:00" },
-  { teamId: "brazil", probability: 0.12, source: "Static fallback", updatedAt: "2026-06-13T12:00:00-05:00" },
-  { teamId: "england", probability: 0.11, source: "Static fallback", updatedAt: "2026-06-13T12:00:00-05:00" },
-  { teamId: "spain", probability: 0.105, source: "Static fallback", updatedAt: "2026-06-13T12:00:00-05:00" },
-  { teamId: "portugal", probability: 0.082, source: "Static fallback", updatedAt: "2026-06-13T12:00:00-05:00" },
-  { teamId: "germany", probability: 0.075, source: "Static fallback", updatedAt: "2026-06-13T12:00:00-05:00" },
-  { teamId: "netherlands", probability: 0.071, source: "Static fallback", updatedAt: "2026-06-13T12:00:00-05:00" },
-  { teamId: "uruguay", probability: 0.045, source: "Static fallback", updatedAt: "2026-06-13T12:00:00-05:00" },
-  { teamId: "colombia", probability: 0.032, source: "Static fallback", updatedAt: "2026-06-13T12:00:00-05:00" },
-];
+export type MarketOddsState = {
+  odds: MarketOdd[];
+  source: string;
+  updatedAt: string;
+  cached?: boolean;
+  warning?: string;
+};
 
-export async function fetchMarketOdds(): Promise<MarketOdd[]> {
+export const initialMarketOddsState: MarketOddsState = {
+  odds: [],
+  source: "The Odds API",
+  updatedAt: new Date(0).toISOString(),
+  warning: "Waiting for market odds.",
+};
+
+export async function fetchMarketOdds(): Promise<MarketOddsState> {
   const endpoint = import.meta.env.VITE_MARKET_ODDS_URL || "/api/market-odds";
 
   try {
     const response = await fetch(endpoint, { headers: { accept: "application/json" } });
-    if (!response.ok) throw new Error(`Odds feed returned ${response.status}`);
-    const payload = (await response.json()) as { odds?: MarketOdd[] };
-    return payload.odds?.length ? payload.odds : fallbackMarketOdds;
-  } catch {
-    return fallbackMarketOdds;
+    const payload = (await response.json()) as Partial<MarketOddsState>;
+
+    return {
+      odds: payload.odds || [],
+      source: payload.source || "The Odds API",
+      updatedAt: payload.updatedAt || new Date().toISOString(),
+      cached: payload.cached,
+      warning: response.ok ? payload.warning : payload.warning || `Odds feed returned ${response.status}`,
+    };
+  } catch (error) {
+    return {
+      ...initialMarketOddsState,
+      updatedAt: new Date().toISOString(),
+      warning: error instanceof Error ? error.message : "Unable to fetch market odds.",
+    };
   }
 }

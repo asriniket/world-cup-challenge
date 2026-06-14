@@ -28,17 +28,17 @@ The app is configured for exactly 48 teams and 10 people. Eight people receive f
 
 Before the draw, the assignment ledger is sealed behind `/api/draw`; the browser does not precompute assignments. Once the draw starts, the server returns the ledger and the browser saves it in `localStorage`.
 
-## Odds feed
+## API feeds
 
-The UI uses static fallback data when keys are missing. The production setup is designed to stay inside free tiers:
+The app intentionally uses only two upstream APIs:
 
 1. Copy `.env.example` into your Vercel or Netlify environment variables.
-2. Set `API_FOOTBALL_KEY` for live World Cup scores, goals, and match results.
-3. Set `ODDS_PROVIDER=the-odds-api` plus `THE_ODDS_API_KEY` for futures/outright odds.
+2. Use WorldCup26 for live World Cup scores, goals, fixtures, and match results.
+3. Set `THE_ODDS_API_KEY` for The Odds API futures/outright odds.
 4. Create a free Upstash Redis database and set `UPSTASH_REDIS_REST_URL` plus `UPSTASH_REDIS_REST_TOKEN` for server-side caching and API budget guards.
 5. Set `DRAW_SEED_SECRET` as a long random server-only value before the draw.
 
-`api/live-state.ts` fetches API-Football `league=1&season=2026` fixtures and caches successful responses in Upstash for 30 minutes. `API_FOOTBALL_FIXTURE_DAILY_LIMIT=55` keeps the fixtures feed under the free 100 requests/day plan even if CDN caching is not doing much.
+`api/live-state.ts` calls `https://worldcup26.ir/get/games` and derives everything the prize boards need from that one response: 104 fixtures, live scores, completed results, team goal totals, final-score margins, upset winners, and the round/type label used to detect the completed Final runner up. Successful snapshots are cached for 6 minutes by default. `WORLDCUP26_DAILY_LIMIT=240` keeps the server from making more than roughly one upstream fetch every 6 minutes when Redis is configured; if the budget is reached or the upstream is down, the API route serves the last cached snapshot. If no cache exists, it returns an explicit warning with empty arrays instead of static data.
 
 Use a tiny manual override only if a provider has a bad team total:
 
@@ -46,10 +46,13 @@ Use a tiny manual override only if a provider has a bad team total:
 LIVE_STAT_OVERRIDES_JSON='[{"teamId":"united-states","played":1,"goalsFor":4,"goalsAgainst":1,"cleanSheets":0,"form":"W"}]'
 ```
 
-`api/market-odds.ts` uses The Odds API free tier and caches successful odds snapshots in Upstash for 6 hours. With the default one-region, one-market request, that is roughly 4 provider credits/day and about 120/month. `ODDS_API_MONTHLY_LIMIT=450` adds a hard guard under the 500-credit/month free plan. If The Odds API is down, over budget, or missing the World Cup outrights market, the app serves the last cached snapshot; if there is no cache yet, it serves static fallback odds. It normalizes futures/outright odds into probability percentages and removes bookmaker overround within each book before averaging.
+`api/market-odds.ts` calls The Odds API v4 odds endpoint for `soccer_fifa_world_cup_winner` with exactly one market: `outrights`. The default `THE_ODDS_REGIONS=us` costs 1 credit per refresh. With `THE_ODDS_CACHE_HOURS=6`, the route spends about 4 credits/day or 120/month, and `THE_ODDS_MONTHLY_LIMIT=450` adds a hard guard under the 500-credit/month free tier. If The Odds API is down, over budget, or missing the World Cup outrights market, the app serves the last cached snapshot. If no cache exists, it returns an explicit warning with an empty odds board instead of static odds. The route normalizes futures odds into no-vig title probabilities and averages across returned books.
+
+API-Football was removed as a runtime option because it duplicates the WorldCup26 fixture path for this app and its free tier is only 100 requests/day. The Odds API scores endpoint was not used for match data because it only returns live/upcoming and recently completed games for selected sports, not the full tournament history needed for the prize boards.
 
 Useful provider docs:
 
+- WorldCup26 API: `https://github.com/rezarahiminia/worldcup2026`
 - API-Football World Cup guide: `https://www.api-football.com/news/post/fifa-world-cup-2026-guide-to-using-data-with-api-sports`
 - The Odds API v4: `https://the-odds-api.com/liveapi/guides/v4/`
 - Upstash Redis REST API: `https://upstash.com/docs/redis/features/restapi`
@@ -60,7 +63,7 @@ For local API verification without spending extra setup time, load `.env.local` 
 
 ```bash
 set -a; source .env.local; set +a
-npx tsx -e "import live from './api/live-state'; (async () => { const r = await live(); console.log(await r.json()); })();"
+npx tsx -e "import { GET } from './api/live-state'; (async () => { const r = await GET(); console.log(await r.json()); })();"
 ```
 
 ## Logic checks

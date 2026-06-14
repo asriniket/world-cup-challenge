@@ -1,18 +1,22 @@
-import { completedResults, liveStats, type CompletedResult, type TeamLiveStat } from "../data/live";
+import type { CompletedResult, LiveFixture, TeamLiveStat } from "../data/live";
 
 export type LiveState = {
   stats: TeamLiveStat[];
   results: CompletedResult[];
+  fixtures: LiveFixture[];
   source: string;
   updatedAt: string;
+  cached?: boolean;
   warning?: string;
 };
 
-export const fallbackLiveState: LiveState = {
-  stats: liveStats,
-  results: completedResults,
-  source: "Static fallback",
-  updatedAt: "2026-06-13T12:00:00-05:00",
+export const initialLiveState: LiveState = {
+  stats: [],
+  results: [],
+  fixtures: [],
+  source: "WorldCup26 API",
+  updatedAt: new Date(0).toISOString(),
+  warning: "Waiting for live match data.",
 };
 
 export async function fetchLiveState(): Promise<LiveState> {
@@ -20,17 +24,22 @@ export async function fetchLiveState(): Promise<LiveState> {
 
   try {
     const response = await fetch(endpoint, { headers: { accept: "application/json" } });
-    if (!response.ok) throw new Error(`Live feed returned ${response.status}`);
     const payload = (await response.json()) as Partial<LiveState>;
-    if (!payload.stats?.length) return fallbackLiveState;
+
     return {
-      stats: payload.stats,
+      stats: payload.stats || [],
       results: payload.results || [],
-      source: payload.source || "Live feed",
+      fixtures: payload.fixtures || [],
+      source: payload.source || "WorldCup26 API",
       updatedAt: payload.updatedAt || new Date().toISOString(),
-      warning: payload.warning,
+      cached: payload.cached,
+      warning: response.ok ? payload.warning : payload.warning || `Live feed returned ${response.status}`,
     };
-  } catch {
-    return fallbackLiveState;
+  } catch (error) {
+    return {
+      ...initialLiveState,
+      updatedAt: new Date().toISOString(),
+      warning: error instanceof Error ? error.message : "Unable to fetch live match data.",
+    };
   }
 }

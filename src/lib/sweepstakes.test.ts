@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { CATEGORY_POTS, DRAW_SEED, PARTICIPANTS, POT_TOTAL_DOLLARS } from "../data/config";
+import { completedResults, liveFixtures, liveStats } from "../data/live";
 import { teams } from "../data/teams";
+import { initialMarketOddsState } from "../services/marketOdds";
+import { buildKnockoutBoard, buildRoundOf32Board } from "./bracket";
 import { buildAssignments, assignmentsByParticipant, hydrateAssignments, serializeAssignments } from "./draw";
 import { computeTeamEvs } from "./ev";
 import { teamIdFromName } from "./teamAliases";
@@ -23,6 +26,55 @@ describe("EV model", () => {
     const totalEv = evs.reduce((sum, ev) => sum + ev.total, 0);
     expect(totalEv).toBeCloseTo(POT_TOTAL_DOLLARS, 8);
     expect(evs.every((ev) => Number.isFinite(ev.total) && ev.total > 0)).toBe(true);
+  });
+});
+
+describe("live prediction fixtures", () => {
+  it("starts market odds empty until The Odds API or cache responds", () => {
+    expect(initialMarketOddsState.odds).toEqual([]);
+    expect(initialMarketOddsState.source).toBe("The Odds API");
+  });
+
+  it("keeps sample post-opener results available for bracket logic tests", () => {
+    expect(completedResults).toContainEqual({ winnerId: "mexico", loserId: "south-africa", score: "2-0" });
+    expect(completedResults).toContainEqual({ winnerId: "united-states", loserId: "paraguay", score: "4-1" });
+    expect(completedResults.some((result) => result.winnerId === "switzerland")).toBe(false);
+
+    expect(liveStats.find((stat) => stat.teamId === "brazil")).toMatchObject({ played: 1, goalsFor: 1, goalsAgainst: 1, form: "D" });
+    expect(liveStats.find((stat) => stat.teamId === "morocco")).toMatchObject({ played: 1, goalsFor: 1, goalsAgainst: 1, form: "D" });
+  });
+
+  it("projects the full Round of 32 board from fixture-backed group tables", () => {
+    const board = buildRoundOf32Board(teams, liveFixtures);
+    expect(board).toHaveLength(16);
+    expect(board[0].matchNumber).toBe(73);
+    expect(board[15].matchNumber).toBe(88);
+
+    const mexicoMatch = board.find((match) => match.matchNumber === 79);
+    expect(mexicoMatch?.entrants[0]).toMatchObject({ teamId: "mexico", source: "projection" });
+
+    const thirdPlaceEntrants = board.flatMap((match) => match.entrants).filter((entrant) => entrant.label.startsWith("Best 3rd"));
+    expect(thirdPlaceEntrants).toHaveLength(8);
+    expect(new Set(thirdPlaceEntrants.map((entrant) => entrant.teamId)).size).toBe(8);
+  });
+
+  it("uses API-published knockout fixtures beyond the Round of 32", () => {
+    const board = buildKnockoutBoard(teams, [
+      {
+        id: 89,
+        status: "NS",
+        round: "Round of 16",
+        homeId: "mexico",
+        awayId: "brazil",
+        homeGoals: null,
+        awayGoals: null,
+      },
+    ]);
+
+    expect(board).toHaveLength(1);
+    expect(board[0]).toMatchObject({ matchNumber: 89, round: "Round of 16", source: "api" });
+    expect(board[0].entrants[0]).toMatchObject({ teamId: "mexico", source: "api" });
+    expect(board[0].entrants[1]).toMatchObject({ teamId: "brazil", source: "api" });
   });
 });
 

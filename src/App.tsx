@@ -13,6 +13,7 @@ import {
   Sparkles,
   Sun,
   Target,
+  TrendingUp,
   Trophy,
   UsersRound,
 } from "lucide-react";
@@ -24,18 +25,18 @@ import {
   PICK_REVEAL_MS,
   POT_TOTAL_DOLLARS,
 } from "./data/config";
-import { bracketMatches } from "./data/bracket";
-import type { CompletedResult, TeamLiveStat } from "./data/live";
+import type { CompletedResult, LiveFixture, TeamLiveStat } from "./data/live";
 import { teams, type Team } from "./data/teams";
 import { fetchDrawLedger } from "./services/drawLedger";
-import { fallbackLiveState, fetchLiveState, type LiveState } from "./services/liveState";
-import { fetchMarketOdds, fallbackMarketOdds, type MarketOdd } from "./services/marketOdds";
+import { fetchLiveState, initialLiveState, type LiveState } from "./services/liveState";
+import { fetchMarketOdds, initialMarketOddsState, type MarketOdd, type MarketOddsState } from "./services/marketOdds";
+import { buildKnockoutBoard, type BracketEntrant } from "./lib/bracket";
 import { assignmentsByParticipant, type Assignment } from "./lib/draw";
 import { computeTeamEvs, type TeamEv } from "./lib/ev";
 import { loadStoredDraw, saveStoredDraw } from "./lib/persistence";
 import { formatCentralTime, formatCountdown } from "./lib/time";
 
-type Tab = "leaders" | "owners" | "playoffs";
+type Tab = "leaders" | "owners" | "playoffs" | "market";
 
 const teamById = new Map(teams.map((team) => [team.id, team]));
 const LIVE_REFRESH_MS = 60 * 1000;
@@ -105,10 +106,19 @@ function formatMarketSource(updatedAt: string) {
   return `Market odds · ${formatUpdatedAt(updatedAt)}`;
 }
 
+function signedPercent(value: number) {
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${(value * 100).toFixed(1)} pts`;
+}
+
 function scoreMargin(score: string) {
   const [winnerGoals, loserGoals] = score.split("-").map((part) => Number(part.trim()));
   if (!Number.isFinite(winnerGoals) || !Number.isFinite(loserGoals)) return 0;
   return Math.max(0, winnerGoals - loserGoals);
+}
+
+function isFinalRound(round?: string) {
+  return /\bfinal\b/i.test(round || "");
 }
 
 function AppHeader({
@@ -250,7 +260,6 @@ function LeadersTab({
   completedResults,
   liveSource,
   liveUpdatedAt,
-  evs,
 }: {
   assignments: Assignment[];
   drawStarted: boolean;
@@ -259,21 +268,23 @@ function LeadersTab({
   completedResults: CompletedResult[];
   liveSource: string;
   liveUpdatedAt: string;
-  evs: TeamEv[];
 }) {
   const assignmentByTeam = new Map(assignments.map((assignment) => [assignment.team.id, assignment]));
-  const evByTeam = new Map(evs.map((ev) => [ev.teamId, ev]));
-  const teamsWithEv = teams
-    .map((team) => ({ team, ev: evByTeam.get(team.id) }))
-    .filter((entry): entry is { team: Team; ev: TeamEv } => Boolean(entry.ev));
   const withTeams = liveStats
     .map((stat) => ({ stat, team: teamById.get(stat.teamId) }))
     .filter((entry): entry is { stat: (typeof liveStats)[number]; team: Team } => Boolean(entry.team));
   const marketBoard = [...marketOdds].sort((a, b) => b.probability - a.probability);
-  const favorite = marketBoard[0] || fallbackMarketOdds[0];
-  const favoriteTeam = teamById.get(favorite.teamId)!;
-  const runnerUpProjection = [...teamsWithEv].sort((a, b) => b.ev.probabilities.runnerUp - a.ev.probabilities.runnerUp)[0];
+  const favorite = marketBoard[0];
+  const favoriteTeam = favorite ? teamById.get(favorite.teamId) : undefined;
   const leastGoals = withTeams.filter(({ stat }) => stat.played > 0).sort((a, b) => a.stat.goalsFor - b.stat.goalsFor)[0];
+  const runnerUpResults = completedResults
+    .map((result) => {
+      const winner = teamById.get(result.winnerId);
+      const runnerUp = teamById.get(result.loserId);
+      if (!winner || !runnerUp || !isFinalRound(result.round)) return undefined;
+      return { result, winner, runnerUp };
+    })
+    .filter((result): result is NonNullable<typeof result> => Boolean(result));
   const biggestUpset = completedResults
     .map((result) => {
       const winner = teamById.get(result.winnerId);
@@ -314,36 +325,22 @@ function LeadersTab({
       detail: "win",
     };
   });
-  const runnerUpRows = [...teamsWithEv]
-    .sort((a, b) => b.ev.probabilities.runnerUp - a.ev.probabilities.runnerUp)
+  const runnerUpRows = runnerUpResults
     .slice(0, 5)
-    .map(({ team, ev }, index) => ({
-      key: team.id,
+    .map(({ result, winner, runnerUp }, index) => ({
+      key: `${result.round || "final"}-${runnerUp.id}`,
       rank: index + 1,
-      team,
-      primary: formatPercent(ev.probabilities.runnerUp),
-      detail: "runner up",
+      team: runnerUp,
+      primary: "Final",
+      detail: `${result.score} vs ${winner.name}`,
     }));
-  const upsetRows = [
-    ...biggestUpsetRows.slice(0, 5).map((result, index) => ({
+  const upsetRows = biggestUpsetRows.slice(0, 5).map((result, index) => ({
       key: `${result.winner.id}-${result.loser.id}`,
       rank: index + 1,
       team: result.winner,
       primary: `+${result.gap}`,
       detail: `beat ${result.loser.name}`,
-    })),
-    ...[...teamsWithEv]
-      .filter(({ team }) => !biggestUpsetRows.some((row) => row.winner.id === team.id))
-      .sort((a, b) => b.ev.probabilities.biggestUpset - a.ev.probabilities.biggestUpset)
-      .slice(0, 5)
-      .map(({ team, ev }, index) => ({
-        key: `model-${team.id}`,
-        rank: biggestUpsetRows.length + index + 1,
-        team,
-        primary: formatPercent(ev.probabilities.biggestUpset),
-        detail: `rank ${team.fifaRank}`,
-      })),
-  ].slice(0, 5);
+    }));
   const fewestGoalRows = leastGoals
     ? [...withTeams]
         .filter(({ stat }) => stat.played > 0)
@@ -356,16 +353,7 @@ function LeadersTab({
           primary: `${stat.goalsFor}`,
           detail: `${stat.played} MP`,
         }))
-    : [...teamsWithEv]
-        .sort((a, b) => b.ev.probabilities.fewestTotalGoals - a.ev.probabilities.fewestTotalGoals)
-        .slice(0, 5)
-        .map(({ team, ev }, index) => ({
-          key: team.id,
-          rank: index + 1,
-          team,
-          primary: formatPercent(ev.probabilities.fewestTotalGoals),
-          detail: "low goals",
-        }));
+    : [];
   const blowoutRows = biggestBlowout
     ? biggestBlowoutRows.slice(0, 5).map((result, index) => ({
         key: `${result.winner.id}-${result.loser.id}`,
@@ -374,60 +362,53 @@ function LeadersTab({
         primary: `+${result.margin}`,
         detail: `${result.result.score} vs ${result.loser.name}`,
       }))
-    : [...teamsWithEv]
-      .sort((a, b) => b.team.attack + b.team.power - (a.team.attack + a.team.power))
-      .slice(0, 5)
-      .map(({ team }, index) => ({
-        key: team.id,
-        rank: index + 1,
-        team,
-        primary: `${team.attack}`,
-        detail: "attack",
-      }));
+    : [];
 
   const rows = [
     {
       title: "World Cup winner",
-      detail: `$${CATEGORY_POTS.champion} to the champion. ${Math.round(favorite.probability * 1000) / 10}% market lead.`,
+      detail: favorite
+        ? `$${CATEGORY_POTS.champion} to the champion. ${Math.round(favorite.probability * 1000) / 10}% market lead.`
+        : "No sportsbook outright odds loaded yet.",
       icon: <Trophy size={20} />,
       team: favoriteTeam,
-      source: formatMarketSource(favorite.updatedAt),
+      source: favorite ? formatMarketSource(favorite.updatedAt) : "The Odds API",
       rankings: winnerRows,
     },
     {
       title: "Runner up",
-      detail: `$${CATEGORY_POTS.runnerUp} to second place. Projection follows the pool model.`,
+      detail: runnerUpRows.length ? `$${CATEGORY_POTS.runnerUp} to the completed Final loser.` : "No completed Final yet.",
       icon: <Medal size={20} />,
-      team: runnerUpProjection?.team,
-      source: "Pre-tournament estimate",
+      team: runnerUpRows[0]?.team,
+      source: `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}`,
       rankings: runnerUpRows,
     },
     {
       title: "Biggest upset",
       detail: biggestUpset
         ? `${biggestUpset.score}, FIFA rank gap ${biggestUpset.gap}`
-        : `$${CATEGORY_POTS.biggestUpset}; projected leaders until an upset lands`,
+        : "No completed ranking upset yet.",
       icon: <Target size={20} />,
-      team: biggestUpset?.winner || upsetRows[0]?.team,
-      source: biggestUpset ? `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}` : "Pre-tournament estimate",
+      team: biggestUpset?.winner,
+      source: `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}`,
       rankings: upsetRows,
     },
     {
       title: "Fewest total goals",
-      detail: leastGoals ? `$${CATEGORY_POTS.fewestTotalGoals}; ${leastGoals.stat.goalsFor} goals through ${leastGoals.stat.played}` : "Projected low-scoring leaders until matches post",
+      detail: leastGoals ? `$${CATEGORY_POTS.fewestTotalGoals}; ${leastGoals.stat.goalsFor} goals through ${leastGoals.stat.played}` : "No completed team totals yet.",
       icon: <Database size={20} />,
-      team: leastGoals?.team || fewestGoalRows[0]?.team,
-      source: leastGoals ? `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}` : "Pre-tournament estimate",
+      team: leastGoals?.team,
+      source: `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}`,
       rankings: fewestGoalRows,
     },
     {
       title: "Biggest blowout",
       detail: biggestBlowout
         ? `${biggestBlowout.result.score}, ${biggestBlowout.margin}-goal margin over ${biggestBlowout.loser.name}`
-        : "Projected blowout leaders until final-score margins post",
+        : "No completed winning margins yet.",
       icon: <Flame size={20} />,
-      team: biggestBlowout?.winner || blowoutRows[0]?.team,
-      source: biggestBlowout ? `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}` : "Pre-tournament attack estimate",
+      team: biggestBlowout?.winner,
+      source: `${liveSource} · ${formatUpdatedAt(liveUpdatedAt)}`,
       rankings: blowoutRows,
     },
   ].map((board) => ({
@@ -452,10 +433,14 @@ function LeadersTab({
                 <div className="noLeader">No leader yet</div>
               )}
               <p>{row.detail}</p>
-              {drawStarted && row.team ? (
-                <OwnerLine assignment={assignmentByTeam.get(row.team.id)} />
+              {row.team ? (
+                drawStarted ? (
+                  <OwnerLine assignment={assignmentByTeam.get(row.team.id)} />
+                ) : (
+                  <span className="muted">Managers unlock at draw</span>
+                )
               ) : (
-                <span className="muted">Managers unlock at draw</span>
+                <span className="muted">Blank until data lands</span>
               )}
               <div className="cardRankings" aria-label={`${row.title} top five`}>
                 <span className="cardRankingsSource">{row.source}</span>
@@ -520,43 +505,310 @@ function OwnersTab({ assignments }: { assignments: Assignment[] }) {
   );
 }
 
-function PlayoffsTab({ assignments, drawStarted }: { assignments: Assignment[]; drawStarted: boolean }) {
+function MarketTab({
+  assignments,
+  drawStarted,
+  evs,
+  marketOdds,
+  oddsWarning,
+  oddsRefreshIn,
+}: {
+  assignments: Assignment[];
+  drawStarted: boolean;
+  evs: TeamEv[];
+  marketOdds: MarketOdd[];
+  oddsWarning?: string;
+  oddsRefreshIn: string;
+}) {
   const assignmentByTeam = new Map(assignments.map((assignment) => [assignment.team.id, assignment]));
+  const marketBoard = [...marketOdds]
+    .map((odd) => ({ odd, team: teamById.get(odd.teamId) }))
+    .filter((entry): entry is { odd: MarketOdd; team: Team } => Boolean(entry.team))
+    .sort((a, b) => b.odd.probability - a.odd.probability);
+  const marketByTeam = new Map(marketBoard.map(({ odd }) => [odd.teamId, odd]));
+  const modelChampionByTeam = new Map(evs.map((ev) => [ev.teamId, ev.probabilities.champion]));
+  const favorite = marketBoard[0];
+  const topFiveMass = marketBoard.slice(0, 5).reduce((sum, entry) => sum + entry.odd.probability, 0);
+  const ownerRows = PARTICIPANTS.map((participant) => {
+    const owned = assignments.filter((assignment) => assignment.participant === participant);
+    const priced = owned
+      .map((assignment) => ({ assignment, odd: marketByTeam.get(assignment.team.id) }))
+      .filter((entry): entry is { assignment: Assignment; odd: MarketOdd } => Boolean(entry.odd));
+    const probability = priced.reduce((sum, entry) => sum + entry.odd.probability, 0);
+    const championEv = probability * CATEGORY_POTS.champion;
+    const best = [...priced].sort((a, b) => b.odd.probability - a.odd.probability)[0];
+
+    return { participant, owned, priced, probability, championEv, best };
+  }).sort((a, b) => b.probability - a.probability);
+  const boardRows = marketBoard.slice(0, 14).map(({ odd, team }, index) => {
+    const model = modelChampionByTeam.get(team.id) || 0;
+    return {
+      key: team.id,
+      rank: index + 1,
+      team,
+      odd,
+      owner: assignmentByTeam.get(team.id)?.participant,
+      model,
+      delta: odd.probability - model,
+      championEv: odd.probability * CATEGORY_POTS.champion,
+    };
+  });
+  const marketRisers = [...marketBoard]
+    .map(({ odd, team }) => ({
+      team,
+      odd,
+      model: modelChampionByTeam.get(team.id) || 0,
+      delta: odd.probability - (modelChampionByTeam.get(team.id) || 0),
+    }))
+    .sort((a, b) => b.delta - a.delta)
+    .slice(0, 5);
+  const marketSkeptics = [...marketBoard]
+    .map(({ odd, team }) => ({
+      team,
+      odd,
+      model: modelChampionByTeam.get(team.id) || 0,
+      delta: odd.probability - (modelChampionByTeam.get(team.id) || 0),
+    }))
+    .sort((a, b) => a.delta - b.delta)
+    .slice(0, 5);
+
+  return (
+    <div className="marketShell">
+      <section className="marketHero">
+        <div>
+          <p className="eyebrow">Odds lab</p>
+          <h3>Market pulse</h3>
+          <p>
+            The sportsbook board is converted into no-vig title probabilities, then mapped onto managers and the $80
+            champion pot.
+          </p>
+        </div>
+        <div className="marketHeroStats">
+          <div>
+            <span>Favorite</span>
+            <b>{favorite ? favorite.team.name : "No market"}</b>
+            <small>{favorite ? `${formatPercent(favorite.odd.probability)} title chance` : "Waiting on odds"}</small>
+          </div>
+          <div>
+            <span>Top 5 mass</span>
+            <b>{formatPercent(topFiveMass)}</b>
+            <small>{marketBoard.length} priced teams</small>
+          </div>
+          <div>
+            <span>Refresh</span>
+            <b>{oddsRefreshIn}</b>
+            <small>{favorite ? formatMarketSource(favorite.odd.updatedAt) : oddsWarning || "Waiting on The Odds API"}</small>
+          </div>
+        </div>
+        {oddsWarning && <div className="feedNotice">{oddsWarning}</div>}
+      </section>
+
+      <section className="marketGrid">
+        <article className="marketCard ownerMarketCard">
+          <div className="marketCardHeader">
+            <div className="marketCardTitle">
+              <p className="eyebrow">Managers</p>
+              <h3>Title Equity</h3>
+              <p>Tracks each manager's combined no-vig chance to own the eventual champion.</p>
+            </div>
+            <span>${CATEGORY_POTS.champion} pot</span>
+          </div>
+          {drawStarted ? (
+            <div className="ownerMarketRows">
+              {ownerRows.map((owner, index) => (
+                <div className="ownerMarketRow" key={owner.participant}>
+                  <span>{index + 1}</span>
+                  <div>
+                    <strong>{owner.participant}</strong>
+                    <small>
+                      {owner.best
+                        ? `${owner.best.assignment.team.name} leads at ${formatPercent(owner.best.odd.probability)}`
+                        : `${owner.owned.length || "-"} teams, none priced yet`}
+                    </small>
+                  </div>
+                  <b>{formatPercent(owner.probability)}</b>
+                  <em>${owner.championEv.toFixed(2)}</em>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="marketLocked">
+              <strong>Manager equity unlocks after the draw.</strong>
+              <span>The odds feed is live, but rosters stay sealed until packs open.</span>
+            </div>
+          )}
+        </article>
+
+        <article className="marketCard">
+          <div className="marketCardHeader">
+            <div className="marketCardTitle">
+              <p className="eyebrow">Board</p>
+              <h3>Top Title Prices</h3>
+              <p>Shows the most likely champions and their current value against the champion pot.</p>
+            </div>
+            <span>No-vig probabilities</span>
+          </div>
+          <div className="marketRows">
+            {boardRows.map((row) => (
+              <div className="marketRow" key={row.key}>
+                <span>{row.rank}</span>
+                <div className="marketTeam">
+                  <Flag team={row.team} />
+                  <strong>{row.team.name}</strong>
+                  {drawStarted && row.owner && <small>{row.owner}</small>}
+                </div>
+                <b>{formatPercent(row.odd.probability)}</b>
+                <em>${row.championEv.toFixed(2)}</em>
+                <i>{signedPercent(row.delta)} vs model</i>
+              </div>
+            ))}
+          </div>
+        </article>
+      </section>
+
+      <section className="marketSignalGrid">
+        <article className="marketCard">
+          <div className="marketCardHeader">
+            <div className="marketCardTitle">
+              <p className="eyebrow">Signal</p>
+              <h3>Market Above Model</h3>
+              <p>Highlights teams the sportsbook market likes more than the static pool model.</p>
+            </div>
+            <span>Odds minus static EV model</span>
+          </div>
+          <div className="signalRows">
+            {marketRisers.map(({ team, odd, delta }) => (
+              <div className="signalRow" key={team.id}>
+                <div>
+                  <Flag team={team} />
+                  <strong>{team.name}</strong>
+                </div>
+                <b>{signedPercent(delta)}</b>
+                <span>{formatPercent(odd.probability)}</span>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="marketCard">
+          <div className="marketCardHeader">
+            <div className="marketCardTitle">
+              <p className="eyebrow">Signal</p>
+              <h3>Model Above Market</h3>
+              <p>Highlights teams the static pool model rates higher than the current market.</p>
+            </div>
+            <span>Static model is more optimistic</span>
+          </div>
+          <div className="signalRows">
+            {marketSkeptics.map(({ team, odd, delta }) => (
+              <div className="signalRow" key={team.id}>
+                <div>
+                  <Flag team={team} />
+                  <strong>{team.name}</strong>
+                </div>
+                <b>{signedPercent(delta)}</b>
+                <span>{formatPercent(odd.probability)}</span>
+              </div>
+            ))}
+          </div>
+        </article>
+      </section>
+    </div>
+  );
+}
+
+function BracketTeam({
+  entrant,
+  assignment,
+  drawStarted,
+}: {
+  entrant: BracketEntrant;
+  assignment?: Assignment;
+  drawStarted: boolean;
+}) {
+  const team = entrant.teamId ? teamById.get(entrant.teamId) : undefined;
+
+  return (
+    <div className={entrant.source === "api" ? "matchTeam apiTeam" : "matchTeam"}>
+      <span className="matchSeed">{entrant.label}</span>
+      {team ? (
+        <>
+          <TeamPill team={team} assignment={drawStarted ? assignment : undefined} />
+          <div className="bracketDetail">
+            <span>{entrant.detail}</span>
+            {entrant.standing && (
+              <b>
+                {entrant.standing.won}-{entrant.standing.drawn}-{entrant.standing.lost}
+              </b>
+            )}
+          </div>
+          {drawStarted && <OwnerLine assignment={assignment} />}
+        </>
+      ) : (
+        <span className="muted">{entrant.detail}</span>
+      )}
+    </div>
+  );
+}
+
+function PlayoffsTab({
+  assignments,
+  drawStarted,
+  fixtures,
+  liveSource,
+  liveUpdatedAt,
+}: {
+  assignments: Assignment[];
+  drawStarted: boolean;
+  fixtures: LiveFixture[];
+  liveSource: string;
+  liveUpdatedAt: string;
+}) {
+  const assignmentByTeam = new Map(assignments.map((assignment) => [assignment.team.id, assignment]));
+  const board = buildKnockoutBoard(teams, fixtures);
+  const hasApiBracket = board.some((match) => match.source === "api");
 
   return (
     <div className="bracketShell">
       <div className="bracketIntro">
         <div>
           <p className="eyebrow">Knockout board</p>
-          <h3>Round of 32 slots</h3>
+          <h3>{hasApiBracket ? "Knockout fixtures" : "Playoffs not started yet"}</h3>
         </div>
-        <span>{drawStarted ? "Owners attached" : "Owners attach after draw"}</span>
+        <span>
+          {liveSource} · {formatUpdatedAt(liveUpdatedAt)}
+        </span>
       </div>
-      <div className="bracketGrid">
-        {bracketMatches.map((match) => (
-          <article className="matchCard" key={match.slot}>
-            <div className="matchRound">{match.round}</div>
-            <strong>{match.slot}</strong>
-            <div className="matchTeams">
-              {match.teamIds.map((teamId, index) => {
-                const team = teamId ? teamById.get(teamId) : undefined;
-                return (
-                  <div className="matchTeam" key={`${match.slot}-${index}`}>
-                    {team ? (
-                      <>
-                        <TeamPill team={team} assignment={drawStarted ? assignmentByTeam.get(team.id) : undefined} />
-                        {drawStarted && <OwnerLine assignment={assignmentByTeam.get(team.id)} />}
-                      </>
-                    ) : (
-                      <span className="muted">TBD qualifier</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </article>
-        ))}
-      </div>
+      {!hasApiBracket && (
+        <div className="bracketEmpty">
+          <strong>Playoffs not started yet</strong>
+          <span>Knockout fixtures will appear here automatically once the API publishes matchups.</span>
+        </div>
+      )}
+      {hasApiBracket && (
+        <div className="bracketGrid">
+          {board.map((match) => (
+            <article className="matchCard" key={match.matchNumber}>
+              <div className="matchMeta">
+                <span className="matchRound">{match.round}</span>
+                {match.status && <span>{match.status}</span>}
+              </div>
+              <strong>{match.slot}</strong>
+              {match.score && <div className="matchScore">{match.score}</div>}
+              <div className="matchTeams">
+                {match.entrants.map((entrant, index) => (
+                  <BracketTeam
+                    assignment={entrant.teamId ? assignmentByTeam.get(entrant.teamId) : undefined}
+                    drawStarted={drawStarted}
+                    entrant={entrant}
+                    key={`${match.matchNumber}-${entrant.teamId || entrant.label}-${index}`}
+                  />
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -565,12 +817,22 @@ function NerdStats({
   assignments,
   drawStarted,
   evs,
+  marketOdds,
+  liveStats,
+  completedResults,
+  liveSource,
+  liveUpdatedAt,
   oddsRefreshIn,
   liveRefreshIn,
 }: {
   assignments: Assignment[];
   drawStarted: boolean;
   evs: TeamEv[];
+  marketOdds: MarketOdd[];
+  liveStats: TeamLiveStat[];
+  completedResults: CompletedResult[];
+  liveSource: string;
+  liveUpdatedAt: string;
   oddsRefreshIn: string;
   liveRefreshIn: string;
 }) {
@@ -586,18 +848,65 @@ function NerdStats({
     totalProbability: evs.reduce((sum, ev) => sum + ev.probabilities[category], 0),
     totalDollars: evs.reduce((sum, ev) => sum + ev.categoryEv[category], 0),
   }));
-  const categoryLeaders = categoryKeys.map((category) => {
-    const leaders = [...teamsWithEv]
-      .sort((a, b) => b.ev.categoryEv[category] - a.ev.categoryEv[category])
-      .slice(0, 3);
-    return { category, leaders };
-  });
-  const modelRecipes = [
-    { label: "Winner", formula: "softmax(exp((power - 55) / 13))" },
-    { label: "Runner up", formula: "softmax(exp((power - 52) / 15) x (1.08 - P(win)))" },
-    { label: "Upset", formula: "softmax(exp((rank - 25) / 22) x exp((power - 42) / 24))" },
-    { label: "Fewest goals", formula: "softmax(exp((58 - attack) / 12) x (1.12 - power / 120))" },
-    { label: "Blowout", formula: "softmax(exp((attack + power - 130) / 18))" },
+  const marketLeaders = [...marketOdds]
+    .sort((a, b) => b.probability - a.probability)
+    .slice(0, 3)
+    .map((odd) => {
+      const team = teamById.get(odd.teamId);
+      return team ? `${team.name} ${formatPercent(odd.probability)}` : undefined;
+    })
+    .filter((leader): leader is string => Boolean(leader));
+  const finalRunnerUps = completedResults
+    .filter((result) => isFinalRound(result.round))
+    .slice(0, 3)
+    .map((result) => {
+      const runnerUp = teamById.get(result.loserId);
+      const winner = teamById.get(result.winnerId);
+      return runnerUp && winner ? `${runnerUp.name} lost ${result.score} to ${winner.name}` : undefined;
+    })
+    .filter((leader): leader is string => Boolean(leader));
+  const observedUpsets = completedResults
+    .map((result) => {
+      const winner = teamById.get(result.winnerId);
+      const loser = teamById.get(result.loserId);
+      if (!winner || !loser || winner.fifaRank <= loser.fifaRank) return undefined;
+      return { winner, loser, gap: winner.fifaRank - loser.fifaRank };
+    })
+    .filter((leader): leader is NonNullable<typeof leader> => Boolean(leader))
+    .sort((a, b) => b.gap - a.gap)
+    .slice(0, 3)
+    .map(({ winner, loser, gap }) => `${winner.name} +${gap} over ${loser.name}`);
+  const observedLowGoals = liveStats
+    .map((stat) => ({ stat, team: teamById.get(stat.teamId) }))
+    .filter((entry): entry is { stat: TeamLiveStat; team: Team } => Boolean(entry.team) && entry.stat.played > 0)
+    .sort((a, b) => a.stat.goalsFor - b.stat.goalsFor || b.stat.played - a.stat.played || a.team.name.localeCompare(b.team.name))
+    .slice(0, 3)
+    .map(({ team, stat }) => `${team.name} ${stat.goalsFor} in ${stat.played}`);
+  const observedBlowouts = completedResults
+    .map((result) => {
+      const winner = teamById.get(result.winnerId);
+      const loser = teamById.get(result.loserId);
+      const margin = scoreMargin(result.score);
+      if (!winner || !loser || margin <= 0) return undefined;
+      return { winner, loser, margin, score: result.score };
+    })
+    .filter((leader): leader is NonNullable<typeof leader> => Boolean(leader))
+    .sort((a, b) => b.margin - a.margin || a.winner.name.localeCompare(b.winner.name))
+    .slice(0, 3)
+    .map(({ winner, loser, margin, score }) => `${winner.name} +${margin}, ${score} vs ${loser.name}`);
+  const observedLeaders = [
+    { label: "Winner", source: "market odds", leaders: marketLeaders },
+    { label: "Runner up", source: "completed Final", leaders: finalRunnerUps },
+    { label: "Upset", source: "completed results", leaders: observedUpsets },
+    { label: "Fewest goals", source: "team totals", leaders: observedLowGoals },
+    { label: "Blowout", source: "winning margins", leaders: observedBlowouts },
+  ];
+  const dataRules = [
+    { label: "Winner", formula: "normalized market odds from the outright futures board" },
+    { label: "Runner up", formula: "completed Final loser only" },
+    { label: "Upset", formula: "completed lower-ranked winner by FIFA ranking gap" },
+    { label: "Fewest goals", formula: "goals for by teams with completed matches" },
+    { label: "Blowout", formula: "completed winning margin" },
   ];
   const ownerTotals = PARTICIPANTS.map((participant) => {
     const owned = assignments.filter((assignment) => assignment.participant === participant);
@@ -619,19 +928,19 @@ function NerdStats({
     <section className="nerdPanel">
       <div className="nerdCopy">
         <p className="eyebrow">Nerd stats</p>
-        <h3>EV lab</h3>
+        <h3>Data lab</h3>
         <p>
-          Every team gets five category probabilities, each category is normalized to 100%, and dollar EV is just
-          probability times payout. The draw algorithm then balances total roster EV while preserving four or five teams.
+          Winner is market-driven. Runner up, upset, total goals, and blowout use only observed tournament data; empty
+          categories stay empty until WorldCup26 publishes completed-match evidence.
         </p>
         <div className="nerdFormula">
           <strong>${POT_TOTAL_DOLLARS} pot</strong>
-          <span>Team EV = Σ P(category win) x category payout</span>
+          <span>Draw EV still balances hidden rosters before reveal</span>
           <span>Target manager EV = ${targetEv.toFixed(2)}</span>
         </div>
         <div className="metricGrid">
           <div>
-            <span>Total modeled EV</span>
+            <span>Total draw EV</span>
             <b>${evs.reduce((sum, ev) => sum + ev.total, 0).toFixed(2)}</b>
           </div>
           <div>
@@ -657,7 +966,7 @@ function NerdStats({
           ))}
         </div>
         <div className="miniTable">
-          <strong>Normalization checks</strong>
+          <strong>Draw EV checks</strong>
           {probabilityChecks.map((check) => (
             <div className="miniRow" key={check.category}>
               <span>
@@ -683,8 +992,8 @@ function NerdStats({
           <small>Server-side Redis/CDN caching protects the free API limits even when browsers check more often.</small>
         </div>
         <div className="miniTable">
-          <strong>Model recipes</strong>
-          {modelRecipes.map((recipe) => (
+          <strong>Data rules</strong>
+          {dataRules.map((recipe) => (
             <div className="miniRow formulaRow" key={recipe.label}>
               <span>{recipe.label}</span>
               <code>{recipe.formula}</code>
@@ -692,18 +1001,19 @@ function NerdStats({
           ))}
         </div>
         <div className="miniTable">
-          <strong>Category probability leaders</strong>
-          {categoryLeaders.map(({ category, leaders }) => (
-            <div className="miniRow" key={category}>
+          <strong>Current data leaders</strong>
+          {observedLeaders.map(({ label, source, leaders }) => (
+            <div className="miniRow" key={label}>
               <span>
-                {categoryLabels[category]}
-                <small>{leaders.map(({ team, ev }) => `${team.name} ${formatPercent(ev.probabilities[category])}`).join(" / ")}</small>
+                {label}
+                <small>{leaders.length ? leaders.join(" / ") : `blank until ${source}`}</small>
               </span>
             </div>
           ))}
+          <small>{liveSource} · {formatUpdatedAt(liveUpdatedAt)}</small>
         </div>
         <div className="miniTable wideMiniTable">
-          <strong>Highest team EV, owner-free</strong>
+          <strong>Draw-balance EV, owner-free</strong>
           {topTeams.map(({ team, ev }) => (
             <div className="miniRow evBreakdownRow" key={team.id}>
               <span>
@@ -755,8 +1065,8 @@ export function App() {
   const [now, setNow] = useState(() => Date.now());
   const [activeTab, setActiveTab] = useState<Tab>("leaders");
   const [nerdOpen, setNerdOpen] = useState(false);
-  const [marketOdds, setMarketOdds] = useState<MarketOdd[]>(fallbackMarketOdds);
-  const [liveState, setLiveState] = useState<LiveState>(fallbackLiveState);
+  const [marketOddsState, setMarketOddsState] = useState<MarketOddsState>(initialMarketOddsState);
+  const [liveState, setLiveState] = useState<LiveState>(initialLiveState);
   const [marketRefreshAt, setMarketRefreshAt] = useState(() => Date.now() + MARKET_REFRESH_MS);
   const [liveRefreshAt, setLiveRefreshAt] = useState(() => Date.now() + LIVE_REFRESH_MS);
   const [theme, setTheme] = useState<"light" | "dark">(() =>
@@ -774,8 +1084,8 @@ export function App() {
     let mounted = true;
     const refresh = () => {
       fetchMarketOdds()
-        .then((odds) => {
-          if (mounted) setMarketOdds(odds);
+        .then((state) => {
+          if (mounted) setMarketOddsState(state);
         })
         .finally(() => {
           if (mounted) setMarketRefreshAt(Date.now() + MARKET_REFRESH_MS);
@@ -843,6 +1153,7 @@ export function App() {
   const countdown = formatCountdown(drawStart - now);
   const oddsRefreshIn = formatRefreshCountdown(Math.min(MARKET_REFRESH_MS, marketRefreshAt - now));
   const liveRefreshIn = formatRefreshCountdown(Math.min(LIVE_REFRESH_MS, liveRefreshAt - now));
+  const marketOdds = marketOddsState.odds;
 
   return (
     <main>
@@ -871,6 +1182,7 @@ export function App() {
           {[
             { id: "leaders", label: "Current leaders", icon: Flame },
             { id: "owners", label: "Managers", icon: UsersRound },
+            { id: "market", label: "Market", icon: TrendingUp },
             { id: "playoffs", label: "Playoffs", icon: Braces },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -901,11 +1213,28 @@ export function App() {
             completedResults={liveState.results}
             liveSource={liveState.source}
             liveUpdatedAt={liveState.updatedAt}
-            evs={evs}
           />
         )}
         {activeTab === "owners" && <OwnersTab assignments={drawStarted ? assignments : revealed} />}
-        {activeTab === "playoffs" && <PlayoffsTab assignments={assignments} drawStarted={drawStarted} />}
+        {activeTab === "market" && (
+          <MarketTab
+            assignments={assignments}
+            drawStarted={drawStarted}
+            evs={evs}
+            marketOdds={marketOdds}
+            oddsWarning={marketOddsState.warning}
+            oddsRefreshIn={oddsRefreshIn}
+          />
+        )}
+        {activeTab === "playoffs" && (
+          <PlayoffsTab
+            assignments={assignments}
+            drawStarted={drawStarted}
+            fixtures={liveState.fixtures}
+            liveSource={liveState.source}
+            liveUpdatedAt={liveState.updatedAt}
+          />
+        )}
       </section>
 
       {nerdOpen && (
@@ -913,6 +1242,11 @@ export function App() {
           assignments={drawStarted ? assignments : []}
           drawStarted={drawStarted}
           evs={evs}
+          marketOdds={marketOdds}
+          liveStats={liveState.stats}
+          completedResults={liveState.results}
+          liveSource={liveState.source}
+          liveUpdatedAt={liveState.updatedAt}
           oddsRefreshIn={oddsRefreshIn}
           liveRefreshIn={liveRefreshIn}
         />
