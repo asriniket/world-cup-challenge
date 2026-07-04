@@ -3,7 +3,7 @@ import { teams } from "../src/data/teams.js";
 import { buildAssignments, serializeAssignments } from "../src/lib/draw.js";
 import { computeTeamEvs } from "../src/lib/ev.js";
 
-const cacheHeaders = { "Cache-Control": "no-store" };
+const cacheHeaders = { "Cache-Control": "no-store, max-age=0, must-revalidate" };
 
 export async function GET(): Promise<Response> {
   const drawStart = new Date(DRAW_START_ISO).getTime();

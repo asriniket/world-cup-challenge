@@ -43,14 +43,14 @@ const cacheKey = "wc2026:worldcup26:games";
 const budgetPrefix = "wc2026:worldcup26:games-budget";
 const memoryCache: { value?: CachedLiveState } = {};
 const memoryBudget = new Map<string, number>();
+const dynamicHeaders = { "Cache-Control": "no-store, max-age=0, must-revalidate" };
 
 function cacheMinutes() {
   return Math.max(2, Number(process.env.WORLDCUP26_CACHE_MINUTES || process.env.LIVE_FIXTURE_CACHE_MINUTES || 6));
 }
 
 function cacheHeaders() {
-  const seconds = cacheMinutes() * 60;
-  return { "Cache-Control": `s-maxage=${Math.min(seconds, 300)}, stale-while-revalidate=${seconds * 2}` };
+  return dynamicHeaders;
 }
 
 function isFresh(cache: CachedLiveState) {
@@ -74,8 +74,8 @@ async function readCache() {
   return parsed;
 }
 
-async function writeCache(games: WorldCup26Game[]) {
-  const value: CachedLiveState = { games, updatedAt: new Date().toISOString() };
+async function writeCache(games: WorldCup26Game[], updatedAt = new Date().toISOString()) {
+  const value: CachedLiveState = { games, updatedAt };
   memoryCache.value = value;
 
   await redisCommand([
@@ -114,23 +114,32 @@ async function fetchWorldCup26Games(): Promise<WorldCup26Game[]> {
 
 async function getGames() {
   const cached = await readCache().catch(() => undefined);
-  if (cached && isFresh(cached)) return { games: cached.games, cached: true };
+  if (cached && isFresh(cached)) return { games: cached.games, cached: true, updatedAt: cached.updatedAt };
 
   const hasBudget = await reserveBudget().catch(() => false);
   if (!hasBudget) {
-    if (cached?.games?.length) return { games: cached.games, cached: true, warning: "Daily WorldCup26 API budget reached; serving the last cached snapshot." };
+    if (cached?.games?.length) {
+      return {
+        games: cached.games,
+        cached: true,
+        updatedAt: cached.updatedAt,
+        warning: "Daily WorldCup26 API budget reached; serving the last cached snapshot.",
+      };
+    }
     throw new Error("Daily WorldCup26 API budget reached and no cached snapshot exists.");
   }
 
   try {
     const games = await fetchWorldCup26Games();
-    await writeCache(games).catch(() => undefined);
-    return { games, cached: false };
+    const updatedAt = new Date().toISOString();
+    await writeCache(games, updatedAt).catch(() => undefined);
+    return { games, cached: false, updatedAt };
   } catch (error) {
     if (cached?.games?.length) {
       return {
         games: cached.games,
         cached: true,
+        updatedAt: cached.updatedAt,
         warning: error instanceof Error ? error.message : "Unknown WorldCup26 API fetch error",
       };
     }
@@ -295,14 +304,14 @@ function emptyPayload(warning: string): LiveStatePayload {
 
 export async function GET(): Promise<Response> {
   try {
-    const { games, cached, warning } = await getGames();
+    const { games, cached, updatedAt, warning } = await getGames();
     const liveState = buildLiveState(games);
 
     return Response.json({
       ...liveState,
       stats: applyManualOverrides(liveState.stats),
       source: sourceName,
-      updatedAt: new Date().toISOString(),
+      updatedAt,
       cached,
       warning,
     }, { headers: cacheHeaders() });

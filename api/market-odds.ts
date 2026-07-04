@@ -34,13 +34,14 @@ const sourceName = "The Odds API";
 const cachePrefix = process.env.ODDS_CACHE_PREFIX || "wc2026:market-odds";
 const memoryCache = new Map<string, CachedOdds>();
 const memoryBudget = new Map<string, number>();
+const dynamicHeaders = { "Cache-Control": "no-store, max-age=0, must-revalidate" };
 
 function oddsCacheHours() {
   return Math.max(1, Number(process.env.THE_ODDS_CACHE_HOURS || process.env.ODDS_CACHE_HOURS || 6));
 }
 
 function cacheHeaders() {
-  return { "Cache-Control": "s-maxage=300, stale-while-revalidate=3600" };
+  return dynamicHeaders;
 }
 
 function sportKey() {

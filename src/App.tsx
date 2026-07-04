@@ -989,7 +989,7 @@ function NerdStats({
               Live in {liveRefreshIn}
             </span>
           </div>
-          <small>Server-side Redis/CDN caching protects the free API limits even when browsers check more often.</small>
+          <small>Server-side Redis caching protects the free API limits even when browsers check more often.</small>
         </div>
         <div className="miniTable">
           <strong>Data rules</strong>
@@ -1073,7 +1073,8 @@ export function App() {
     typeof window === "undefined" ? "light" : window.localStorage.getItem("wc-theme") === "dark" ? "dark" : "light",
   );
   const evs = useMemo(() => computeTeamEvs(teams), []);
-  const [lockedAssignments, setLockedAssignments] = useState<Assignment[] | null>(() => loadStoredDraw(teams, evs));
+  const [storedAssignments] = useState<Assignment[] | null>(() => loadStoredDraw(teams, evs));
+  const [lockedAssignments, setLockedAssignments] = useState<Assignment[] | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -1131,19 +1132,27 @@ export function App() {
   const drawStarted = elapsed >= 0;
 
   useEffect(() => {
-    if (!drawStarted || lockedAssignments) return;
+    if (!drawStarted) return;
     let cancelled = false;
 
     fetchDrawLedger(teams, evs).then((serverAssignments) => {
-      if (cancelled || !serverAssignments?.length) return;
-      saveStoredDraw(serverAssignments);
-      setLockedAssignments(serverAssignments);
+      if (cancelled) return;
+
+      if (serverAssignments?.length) {
+        saveStoredDraw(serverAssignments);
+        setLockedAssignments(serverAssignments);
+        return;
+      }
+
+      if (storedAssignments?.length) {
+        setLockedAssignments(storedAssignments);
+      }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [drawStarted, evs, lockedAssignments]);
+  }, [drawStarted, evs, storedAssignments]);
 
   const drawLoading = drawStarted && assignments.length === 0;
   const currentIndex = drawStarted && assignments.length ? Math.min(assignments.length - 1, Math.floor(elapsed / PICK_REVEAL_MS)) : -1;

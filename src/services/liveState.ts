@@ -1,4 +1,5 @@
 import type { CompletedResult, LiveFixture, TeamLiveStat } from "../data/live";
+import { freshEndpoint, noStoreJsonRequest } from "./http";
 
 export type LiveState = {
   stats: TeamLiveStat[];
@@ -23,7 +24,7 @@ export async function fetchLiveState(): Promise<LiveState> {
   const endpoint = import.meta.env.VITE_LIVE_STATE_URL || "/api/live-state";
 
   try {
-    const response = await fetch(endpoint, { headers: { accept: "application/json" } });
+    const response = await fetch(freshEndpoint(endpoint), noStoreJsonRequest);
     const payload = (await response.json()) as Partial<LiveState>;
 
     return {

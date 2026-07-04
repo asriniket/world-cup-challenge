@@ -1,3 +1,5 @@
+import { freshEndpoint, noStoreJsonRequest } from "./http";
+
 export type MarketOdd = {
   teamId: string;
   probability: number;
@@ -24,7 +26,7 @@ export async function fetchMarketOdds(): Promise<MarketOddsState> {
   const endpoint = import.meta.env.VITE_MARKET_ODDS_URL || "/api/market-odds";
 
   try {
-    const response = await fetch(endpoint, { headers: { accept: "application/json" } });
+    const response = await fetch(freshEndpoint(endpoint), noStoreJsonRequest);
     const payload = (await response.json()) as Partial<MarketOddsState>;
 
     return {
