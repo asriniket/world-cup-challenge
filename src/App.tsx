@@ -31,7 +31,8 @@ import { fetchDrawLedger } from "./services/drawLedger";
 import { fetchLiveState, initialLiveState, type LiveState } from "./services/liveState";
 import { fetchMarketOdds, initialMarketOddsState, type MarketOdd, type MarketOddsState } from "./services/marketOdds";
 import { buildKnockoutBoard, type BracketEntrant } from "./lib/bracket";
-import { assignmentsByParticipant, type Assignment } from "./lib/draw";
+import { currentOwnerValues, currentPrizePoolTotal } from "./lib/currentEv";
+import type { Assignment } from "./lib/draw";
 import { computeTeamEvs, type TeamEv } from "./lib/ev";
 import { loadStoredDraw, saveStoredDraw } from "./lib/persistence";
 import { formatCentralTime, formatCountdown } from "./lib/time";
@@ -41,6 +42,8 @@ type Tab = "leaders" | "owners" | "playoffs" | "market";
 const teamById = new Map(teams.map((team) => [team.id, team]));
 const LIVE_REFRESH_MS = 60 * 1000;
 const MARKET_REFRESH_MS = 5 * 60 * 1000;
+const MIN_REFRESH_DELAY_MS = 30 * 1000;
+const MAX_REFRESH_DELAY_MS = 24 * 60 * 60 * 1000;
 const categoryLabels: Record<keyof typeof CATEGORY_POTS, string> = {
   champion: "World Cup winner",
   runnerUp: "Runner up",
@@ -83,27 +86,70 @@ function OwnerLine({ assignment }: { assignment?: Assignment }) {
 function formatRefreshCountdown(ms: number) {
   if (ms <= 0) return "refreshing now";
   const totalSeconds = Math.ceil(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
+  if (minutes < 60) {
+    if (seconds === 0) return `${minutes}m`;
+    return `${minutes}m ${seconds}s`;
+  }
 
-  if (minutes <= 0) return `${seconds}s`;
-  if (seconds === 0) return `${minutes}m`;
-  return `${minutes}m ${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) {
+    if (remainingMinutes === 0) return `${hours}h`;
+    return `${hours}h ${remainingMinutes}m`;
+  }
+
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  if (remainingHours === 0) return `${days}d`;
+  return `${days}d ${remainingHours}h`;
+}
+
+function formatTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 function formatUpdatedAt(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Updated just now";
+  const time = formatTime(value);
+  if (!time) return "Updated just now";
 
-  return `Updated ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  return `Updated ${time}`;
+}
+
+function formatLowerUpdatedAt(value: string) {
+  const time = formatTime(value);
+  if (!time) return "updated just now";
+
+  return `updated ${time}`;
 }
 
 function formatPercent(value: number) {
   return `${(value * 100).toFixed(value >= 0.1 ? 1 : 2)}%`;
 }
 
-function formatMarketSource(updatedAt: string) {
-  return `Market odds · ${formatUpdatedAt(updatedAt)}`;
+function formatMarketSource(state: MarketOddsState) {
+  if (!state.odds.length) return state.warning || "Waiting on The Odds API";
+
+  const marketUpdatedAt = state.marketUpdatedAt || state.odds[0]?.updatedAt || state.updatedAt;
+  const label = state.cached ? "Cached odds" : "Market odds";
+  return `${label} · Books ${formatLowerUpdatedAt(marketUpdatedAt)}`;
+}
+
+function refreshTargetFrom(value: string | undefined, fallbackMs: number) {
+  const timestamp = value ? Date.parse(value) : Number.NaN;
+  if (Number.isFinite(timestamp) && timestamp > Date.now()) return timestamp;
+
+  return Date.now() + fallbackMs;
+}
+
+function timerDelayUntil(timestamp: number) {
+  return Math.max(MIN_REFRESH_DELAY_MS, Math.min(MAX_REFRESH_DELAY_MS, timestamp - Date.now()));
 }
 
 function signedPercent(value: number) {
@@ -258,6 +304,7 @@ function LeadersTab({
   marketOdds,
   liveStats,
   completedResults,
+  marketSource,
   liveSource,
   liveUpdatedAt,
 }: {
@@ -266,6 +313,7 @@ function LeadersTab({
   marketOdds: MarketOdd[];
   liveStats: TeamLiveStat[];
   completedResults: CompletedResult[];
+  marketSource: string;
   liveSource: string;
   liveUpdatedAt: string;
 }) {
@@ -372,7 +420,7 @@ function LeadersTab({
         : "No sportsbook outright odds loaded yet.",
       icon: <Trophy size={20} />,
       team: favoriteTeam,
-      source: favorite ? formatMarketSource(favorite.updatedAt) : "The Odds API",
+      source: favorite ? marketSource : "The Odds API",
       rankings: winnerRows,
     },
     {
@@ -465,26 +513,41 @@ function LeadersTab({
   );
 }
 
-function OwnersTab({ assignments }: { assignments: Assignment[] }) {
-  const grouped = assignmentsByParticipant(assignments);
+function OwnersTab({ assignments, marketOdds }: { assignments: Assignment[]; marketOdds: MarketOdd[] }) {
   const drawLocked = assignments.length > 0;
+  const ownerValues = currentOwnerValues(assignments, PARTICIPANTS, marketOdds);
+  const currentTargetEv = currentPrizePoolTotal(marketOdds) / PARTICIPANTS.length;
 
   return (
     <div className="ownersGrid">
-      {PARTICIPANTS.map((participant) => {
-        const ownerAssignments = grouped[participant] || [];
+      {ownerValues.map((owner) => {
         return (
-          <article className="ownerCard" key={participant}>
+          <article className="ownerCard" key={owner.participant}>
             <div className="ownerHeader">
               <div>
                 <p className="eyebrow">Manager</p>
-                <h3>{participant}</h3>
+                <h3>{owner.participant}</h3>
               </div>
-              <div className="evBubble">{ownerAssignments.length || "-"} teams</div>
+              <div className="evBubble">
+                {drawLocked ? (
+                  <>
+                    <span>EV</span>
+                    <strong>${owner.total.toFixed(1)}</strong>
+                  </>
+                ) : (
+                  `${owner.teams || "-"} teams`
+                )}
+              </div>
             </div>
+            {drawLocked && (
+              <div className="ownerValueMeta">
+                <span>W ${owner.championEv.toFixed(1)}</span>
+                <span>Delta ${(owner.total - currentTargetEv).toFixed(2)}</span>
+              </div>
+            )}
             <div className="ownerTeams">
               {drawLocked ? (
-                ownerAssignments.map((assignment) => <TeamPill key={assignment.team.id} team={assignment.team} />)
+                owner.assignments.map((assignment) => <TeamPill key={assignment.team.id} team={assignment.team} />)
               ) : (
                 <div className="lockedRoster">
                   <span>Roster locked until draw</span>
@@ -512,6 +575,7 @@ function MarketTab({
   marketOdds,
   oddsWarning,
   oddsRefreshIn,
+  marketSource,
 }: {
   assignments: Assignment[];
   drawStarted: boolean;
@@ -519,6 +583,7 @@ function MarketTab({
   marketOdds: MarketOdd[];
   oddsWarning?: string;
   oddsRefreshIn: string;
+  marketSource: string;
 }) {
   const assignmentByTeam = new Map(assignments.map((assignment) => [assignment.team.id, assignment]));
   const marketBoard = [...marketOdds]
@@ -595,9 +660,9 @@ function MarketTab({
             <small>{marketBoard.length} priced teams</small>
           </div>
           <div>
-            <span>Refresh</span>
+            <span>Next odds fetch</span>
             <b>{oddsRefreshIn}</b>
-            <small>{favorite ? formatMarketSource(favorite.odd.updatedAt) : oddsWarning || "Waiting on The Odds API"}</small>
+            <small>{favorite ? marketSource : oddsWarning || marketSource}</small>
           </div>
         </div>
         {oddsWarning && <div className="feedNotice">{oddsWarning}</div>}
@@ -841,7 +906,7 @@ function NerdStats({
     .map((team) => ({ team, ev: evByTeam.get(team.id)! }))
     .filter((entry) => Boolean(entry.ev));
   const topTeams = [...teamsWithEv].sort((a, b) => b.ev.total - a.ev.total).slice(0, 8);
-  const targetEv = POT_TOTAL_DOLLARS / PARTICIPANTS.length;
+  const drawTargetEv = POT_TOTAL_DOLLARS / PARTICIPANTS.length;
   const categoryKeys = Object.keys(CATEGORY_POTS) as Array<keyof typeof CATEGORY_POTS>;
   const probabilityChecks = categoryKeys.map((category) => ({
     category,
@@ -908,15 +973,8 @@ function NerdStats({
     { label: "Fewest goals", formula: "goals for by teams with completed matches" },
     { label: "Blowout", formula: "completed winning margin" },
   ];
-  const ownerTotals = PARTICIPANTS.map((participant) => {
-    const owned = assignments.filter((assignment) => assignment.participant === participant);
-    return {
-      participant,
-      teams: owned.length,
-      tierOne: owned.filter((assignment) => assignment.team.tier === 1).length,
-      total: owned.reduce((sum, assignment) => sum + assignment.ev.total, 0),
-    };
-  }).sort((a, b) => b.total - a.total);
+  const currentTargetEv = currentPrizePoolTotal(marketOdds) / PARTICIPANTS.length;
+  const ownerTotals = [...currentOwnerValues(assignments, PARTICIPANTS, marketOdds)].sort((a, b) => b.total - a.total);
   const ownerValues = ownerTotals.map((owner) => owner.total);
   const ownerAverage = ownerValues.reduce((sum, value) => sum + value, 0) / Math.max(1, ownerValues.length);
   const ownerStdDev = Math.sqrt(
@@ -935,16 +993,16 @@ function NerdStats({
         </p>
         <div className="nerdFormula">
           <strong>${POT_TOTAL_DOLLARS} pot</strong>
-          <span>Draw EV still balances hidden rosters before reveal</span>
-          <span>Target manager EV = ${targetEv.toFixed(2)}</span>
+          <span>Draw EV model balances hidden rosters before reveal</span>
+          <span>Draw target = ${drawTargetEv.toFixed(2)}</span>
         </div>
         <div className="metricGrid">
           <div>
-            <span>Total draw EV</span>
+            <span>Draw-model total</span>
             <b>${evs.reduce((sum, ev) => sum + ev.total, 0).toFixed(2)}</b>
           </div>
           <div>
-            <span>Average team EV</span>
+            <span>Draw-model avg</span>
             <b>${(POT_TOTAL_DOLLARS / teams.length).toFixed(2)}</b>
           </div>
           <div>
@@ -966,7 +1024,7 @@ function NerdStats({
           ))}
         </div>
         <div className="miniTable">
-          <strong>Draw EV checks</strong>
+          <strong>Draw-model EV checks</strong>
           {probabilityChecks.map((check) => (
             <div className="miniRow" key={check.category}>
               <span>
@@ -982,7 +1040,7 @@ function NerdStats({
           <div className="refreshStats nerdRefreshStats">
             <span>
               <Clock3 size={15} />
-              Odds in {oddsRefreshIn}
+              Odds fetch in {oddsRefreshIn}
             </span>
             <span>
               <Clock3 size={15} />
@@ -1032,14 +1090,14 @@ function NerdStats({
             <div className="fairnessSummary">
               <span>Spread ${ownerSpread.toFixed(2)}</span>
               <span>Std dev ${ownerStdDev.toFixed(2)}</span>
-              <span>Target ${targetEv.toFixed(2)}</span>
+              <span>Target ${currentTargetEv.toFixed(2)}</span>
             </div>
             {ownerTotals.map((owner) => (
               <div className="miniRow" key={owner.participant}>
                 <span>
                   {owner.participant}
                   <small>
-                    {owner.teams || "-"} teams, {owner.tierOne} T1, delta ${(owner.total - targetEv).toFixed(2)}
+                    W ${owner.championEv.toFixed(1)}, {owner.teams || "-"} teams, {owner.tierOne} T1, delta ${(owner.total - currentTargetEv).toFixed(2)}
                   </small>
                 </span>
                 <b>${owner.total.toFixed(1)}</b>
@@ -1083,21 +1141,30 @@ export function App() {
 
   useEffect(() => {
     let mounted = true;
-    const refresh = () => {
+    let timer: number | undefined;
+
+    function scheduleRefresh(targetAt: number) {
+      if (!mounted) return;
+
+      setMarketRefreshAt(targetAt);
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(refresh, timerDelayUntil(targetAt));
+    }
+
+    function refresh() {
       fetchMarketOdds()
         .then((state) => {
-          if (mounted) setMarketOddsState(state);
-        })
-        .finally(() => {
-          if (mounted) setMarketRefreshAt(Date.now() + MARKET_REFRESH_MS);
+          if (!mounted) return;
+
+          setMarketOddsState(state);
+          scheduleRefresh(refreshTargetFrom(state.nextRefreshAt, MARKET_REFRESH_MS));
         });
-    };
+    }
 
     refresh();
-    const timer = window.setInterval(refresh, MARKET_REFRESH_MS);
     return () => {
       mounted = false;
-      window.clearInterval(timer);
+      if (timer) window.clearTimeout(timer);
     };
   }, []);
 
@@ -1160,9 +1227,10 @@ export function App() {
   const revealed = drawStarted && assignments.length ? assignments.slice(0, drawComplete ? assignments.length : currentIndex + 1) : [];
   const currentPick = drawComplete ? assignments[assignments.length - 1] : assignments[currentIndex];
   const countdown = formatCountdown(drawStart - now);
-  const oddsRefreshIn = formatRefreshCountdown(Math.min(MARKET_REFRESH_MS, marketRefreshAt - now));
+  const oddsRefreshIn = formatRefreshCountdown(marketRefreshAt - now);
   const liveRefreshIn = formatRefreshCountdown(Math.min(LIVE_REFRESH_MS, liveRefreshAt - now));
   const marketOdds = marketOddsState.odds;
+  const marketSource = formatMarketSource(marketOddsState);
 
   return (
     <main>
@@ -1220,11 +1288,12 @@ export function App() {
             marketOdds={marketOdds}
             liveStats={liveState.stats}
             completedResults={liveState.results}
+            marketSource={marketSource}
             liveSource={liveState.source}
             liveUpdatedAt={liveState.updatedAt}
           />
         )}
-        {activeTab === "owners" && <OwnersTab assignments={drawStarted ? assignments : revealed} />}
+        {activeTab === "owners" && <OwnersTab assignments={drawStarted ? assignments : revealed} marketOdds={marketOdds} />}
         {activeTab === "market" && (
           <MarketTab
             assignments={assignments}
@@ -1233,6 +1302,7 @@ export function App() {
             marketOdds={marketOdds}
             oddsWarning={marketOddsState.warning}
             oddsRefreshIn={oddsRefreshIn}
+            marketSource={marketSource}
           />
         )}
         {activeTab === "playoffs" && (

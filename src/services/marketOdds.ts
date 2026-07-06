@@ -11,6 +11,8 @@ export type MarketOddsState = {
   odds: MarketOdd[];
   source: string;
   updatedAt: string;
+  marketUpdatedAt?: string;
+  nextRefreshAt?: string;
   cached?: boolean;
   warning?: string;
 };
@@ -33,6 +35,8 @@ export async function fetchMarketOdds(): Promise<MarketOddsState> {
       odds: payload.odds || [],
       source: payload.source || "The Odds API",
       updatedAt: payload.updatedAt || new Date().toISOString(),
+      marketUpdatedAt: payload.marketUpdatedAt,
+      nextRefreshAt: payload.nextRefreshAt,
       cached: payload.cached,
       warning: response.ok ? payload.warning : payload.warning || `Odds feed returned ${response.status}`,
     };

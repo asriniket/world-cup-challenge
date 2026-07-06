@@ -12,6 +12,7 @@ type MarketOdd = {
 type CachedOdds = {
   odds: MarketOdd[];
   updatedAt: string;
+  marketUpdatedAt?: string;
   quota?: OddsQuota;
 };
 
@@ -26,6 +27,8 @@ type OddsPayload = {
   cached: boolean;
   source: string;
   updatedAt: string;
+  marketUpdatedAt?: string;
+  nextRefreshAt: string;
   quota?: OddsQuota;
   warning?: string;
 };
@@ -38,6 +41,10 @@ const dynamicHeaders = { "Cache-Control": "no-store, max-age=0, must-revalidate"
 
 function oddsCacheHours() {
   return Math.max(1, Number(process.env.THE_ODDS_CACHE_HOURS || process.env.ODDS_CACHE_HOURS || 6));
+}
+
+function retryRefreshMs() {
+  return Math.max(1, Number(process.env.THE_ODDS_RETRY_MINUTES || 5)) * 60 * 1000;
 }
 
 function cacheHeaders() {
@@ -69,6 +76,30 @@ function isFresh(cache: CachedOdds) {
   return Date.now() - Date.parse(cache.updatedAt) < oddsCacheHours() * 60 * 60 * 1000;
 }
 
+function nextCacheRefreshAt(updatedAt: string) {
+  const timestamp = Date.parse(updatedAt);
+  if (!Number.isFinite(timestamp)) return retryRefreshAt();
+
+  return new Date(timestamp + oddsCacheHours() * 60 * 60 * 1000).toISOString();
+}
+
+function retryRefreshAt() {
+  return new Date(Date.now() + retryRefreshMs()).toISOString();
+}
+
+function nextMonthlyBudgetRefreshAt(now = new Date()) {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString();
+}
+
+function latestMarketUpdatedAt(odds: MarketOdd[]) {
+  const updates = odds
+    .map((odd) => odd.updatedAt)
+    .filter((updatedAt) => Number.isFinite(Date.parse(updatedAt)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b));
+
+  return updates[updates.length - 1];
+}
+
 async function readOddsCache(key: string) {
   const memory = memoryCache.get(key);
   if (memory) return memory;
@@ -79,10 +110,10 @@ async function readOddsCache(key: string) {
   return parsed;
 }
 
-async function writeOddsCache(key: string, odds: MarketOdd[], quota?: OddsQuota) {
+async function writeOddsCache(key: string, odds: MarketOdd[], quota?: OddsQuota, updatedAt = new Date().toISOString()) {
   if (!odds.length) return;
 
-  const payload: CachedOdds = { odds, updatedAt: new Date().toISOString(), quota };
+  const payload: CachedOdds = { odds, updatedAt, marketUpdatedAt: latestMarketUpdatedAt(odds), quota };
   memoryCache.set(key, payload);
   await redisCommand([
     "SET",
@@ -221,23 +252,26 @@ async function fetchTheOddsApi(): Promise<{ odds: MarketOdd[]; quota: OddsQuota 
   return { odds, quota };
 }
 
-function payloadFromCache(cache: CachedOdds, warning?: string): OddsPayload {
+function payloadFromCache(cache: CachedOdds, warning?: string, nextRefreshAt = nextCacheRefreshAt(cache.updatedAt)): OddsPayload {
   return {
     odds: cache.odds,
     cached: true,
     source: sourceName,
     updatedAt: cache.updatedAt,
+    marketUpdatedAt: cache.marketUpdatedAt || latestMarketUpdatedAt(cache.odds),
+    nextRefreshAt,
     quota: cache.quota,
     warning: warning || coverageWarning(cache.odds),
   };
 }
 
-function emptyPayload(warning: string): OddsPayload {
+function emptyPayload(warning: string, nextRefreshAt = retryRefreshAt()): OddsPayload {
   return {
     odds: [],
     cached: false,
     source: sourceName,
     updatedAt: new Date().toISOString(),
+    nextRefreshAt,
     warning,
   };
 }
@@ -258,29 +292,33 @@ export async function GET(): Promise<Response> {
   try {
     const hasBudget = await reserveOddsBudget();
     if (!hasBudget) {
-      if (cached) return Response.json(payloadFromCache(cached, "Monthly Odds API budget reached; serving the last cached snapshot."), { headers: cacheHeaders() });
-      return Response.json(emptyPayload("Monthly Odds API budget reached and no cached odds snapshot exists."), { status: 429, headers: cacheHeaders() });
+      const nextRefreshAt = nextMonthlyBudgetRefreshAt();
+      if (cached) return Response.json(payloadFromCache(cached, "Monthly Odds API budget reached; serving the last cached snapshot.", nextRefreshAt), { headers: cacheHeaders() });
+      return Response.json(emptyPayload("Monthly Odds API budget reached and no cached odds snapshot exists.", nextRefreshAt), { status: 429, headers: cacheHeaders() });
     }
 
     const { odds, quota } = await fetchTheOddsApi();
     if (!odds.length) {
       const warning = "The Odds API returned no mapped World Cup outright odds.";
-      if (cached) return Response.json(payloadFromCache(cached, warning), { headers: cacheHeaders() });
+      if (cached) return Response.json(payloadFromCache(cached, warning, retryRefreshAt()), { headers: cacheHeaders() });
       return Response.json(emptyPayload(warning), { status: 502, headers: cacheHeaders() });
     }
 
-    await writeOddsCache(key, odds, quota).catch(() => undefined);
+    const updatedAt = new Date().toISOString();
+    await writeOddsCache(key, odds, quota, updatedAt).catch(() => undefined);
     return Response.json({
       odds,
       cached: false,
       source: sourceName,
-      updatedAt: new Date().toISOString(),
+      updatedAt,
+      marketUpdatedAt: latestMarketUpdatedAt(odds),
+      nextRefreshAt: nextCacheRefreshAt(updatedAt),
       quota,
       warning: coverageWarning(odds),
     }, { headers: cacheHeaders() });
   } catch (error) {
     const warning = error instanceof Error ? error.message : "Unknown Odds API fetch error";
-    if (cached) return Response.json(payloadFromCache(cached, warning), { headers: cacheHeaders() });
+    if (cached) return Response.json(payloadFromCache(cached, warning, retryRefreshAt()), { headers: cacheHeaders() });
     return Response.json(emptyPayload(warning), { status: 502, headers: cacheHeaders() });
   }
 }
