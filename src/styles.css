@@ -844,33 +844,6 @@ code {
   font-weight: 900;
 }
 
-.evBubble span {
-  font-size: 0.62rem;
-  text-transform: uppercase;
-  opacity: 0.8;
-}
-
-.evBubble strong {
-  font-size: 0.9rem;
-}
-
-.ownerValueMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: -4px 0 10px;
-}
-
-.ownerValueMeta span {
-  padding: 4px 7px;
-  color: var(--status-ink);
-  background: var(--status-bg);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 0.72rem;
-  font-weight: 900;
-}
-
 .ownerTeams {
   display: grid;
   gap: 7px;

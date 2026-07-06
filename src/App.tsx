@@ -513,41 +513,25 @@ function LeadersTab({
   );
 }
 
-function OwnersTab({ assignments, marketOdds }: { assignments: Assignment[]; marketOdds: MarketOdd[] }) {
+function OwnersTab({ assignments }: { assignments: Assignment[] }) {
   const drawLocked = assignments.length > 0;
-  const ownerValues = currentOwnerValues(assignments, PARTICIPANTS, marketOdds);
-  const currentTargetEv = currentPrizePoolTotal(marketOdds) / PARTICIPANTS.length;
 
   return (
     <div className="ownersGrid">
-      {ownerValues.map((owner) => {
+      {PARTICIPANTS.map((participant) => {
+        const ownerAssignments = assignments.filter((assignment) => assignment.participant === participant);
         return (
-          <article className="ownerCard" key={owner.participant}>
+          <article className="ownerCard" key={participant}>
             <div className="ownerHeader">
               <div>
                 <p className="eyebrow">Manager</p>
-                <h3>{owner.participant}</h3>
+                <h3>{participant}</h3>
               </div>
-              <div className="evBubble">
-                {drawLocked ? (
-                  <>
-                    <span>EV</span>
-                    <strong>${owner.total.toFixed(1)}</strong>
-                  </>
-                ) : (
-                  `${owner.teams || "-"} teams`
-                )}
-              </div>
+              <div className="evBubble">{ownerAssignments.length || "-"} teams</div>
             </div>
-            {drawLocked && (
-              <div className="ownerValueMeta">
-                <span>W ${owner.championEv.toFixed(1)}</span>
-                <span>Delta ${(owner.total - currentTargetEv).toFixed(2)}</span>
-              </div>
-            )}
             <div className="ownerTeams">
               {drawLocked ? (
-                owner.assignments.map((assignment) => <TeamPill key={assignment.team.id} team={assignment.team} />)
+                ownerAssignments.map((assignment) => <TeamPill key={assignment.team.id} team={assignment.team} />)
               ) : (
                 <div className="lockedRoster">
                   <span>Roster locked until draw</span>
@@ -1293,7 +1277,7 @@ export function App() {
             liveUpdatedAt={liveState.updatedAt}
           />
         )}
-        {activeTab === "owners" && <OwnersTab assignments={drawStarted ? assignments : revealed} marketOdds={marketOdds} />}
+        {activeTab === "owners" && <OwnersTab assignments={drawStarted ? assignments : revealed} />}
         {activeTab === "market" && (
           <MarketTab
             assignments={assignments}
