@@ -93,7 +93,6 @@ main {
 .leaderTeam,
 .ownerLine,
 .teamPill,
-.bracketIntro,
 footer {
   display: flex;
   align-items: center;
@@ -436,7 +435,7 @@ h3 {
 .feedCard,
 .tableCard,
 .ownerCard,
-.matchCard,
+.playoffRound,
 .nerdPanel {
   background: var(--card);
   border: 1px solid var(--line);
@@ -1157,127 +1156,533 @@ code {
   border-radius: 8px;
 }
 
-.bracketShell {
+.playoffShell {
   display: grid;
   gap: 14px;
 }
 
-.bracketIntro {
-  justify-content: space-between;
+.playoffOverview {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
   gap: 16px;
-  padding: 16px 18px;
+  padding: 16px;
   color: #fff;
   background: var(--status-bg);
   border: 1px solid var(--line);
   border-radius: 8px;
 }
 
-.bracketIntro .eyebrow {
+.playoffOverview .eyebrow {
   color: #ffd873;
 }
 
-.bracketIntro span {
-  color: rgba(255, 255, 255, 0.76);
+.playoffOverviewCopy {
+  display: grid;
+  gap: 8px;
+  align-content: space-between;
+  min-height: 148px;
 }
 
-.bracketEmpty {
+.playoffOverviewCopy h3 {
+  margin: 0;
+  font-size: 1.24rem;
+}
+
+.playoffOverviewCopy p:not(.eyebrow) {
+  max-width: 680px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  line-height: 1.45;
+}
+
+.playoffOverviewCopy > span {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.playoffSummaryGrid {
   display: grid;
-  gap: 6px;
-  min-height: 180px;
-  align-content: center;
-  padding: 18px;
-  color: var(--muted);
-  background: var(--surface-muted);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  align-content: stretch;
+}
+
+.playoffSummaryStat {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+}
+
+.playoffSummaryStat span,
+.playoffSummaryStat small {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.playoffSummaryStat b {
+  color: #fff;
+  font-size: 1.36rem;
+  line-height: 1;
+}
+
+.playoffSummaryStat small {
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 0.68rem;
+  line-height: 1.25;
+  text-transform: none;
+  white-space: normal;
+}
+
+.playoffRounds {
+  display: grid;
+  gap: 12px;
+}
+
+.playoffBracketView {
+  display: grid;
+  min-width: 0;
+}
+
+.playoffBracketScroller {
+  min-width: 0;
+  overflow-x: auto;
+  padding: 4px 2px 12px;
+}
+
+.playoffBracketBoard {
+  display: grid;
+  grid-auto-columns: minmax(220px, 1fr);
+  grid-auto-flow: column;
+  gap: 14px;
+  min-width: min-content;
+}
+
+.playoffBracketColumn {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  min-width: 0;
+}
+
+.playoffBracketHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 40px;
+  padding: 9px 10px;
+  color: var(--status-ink);
+  background: var(--status-bg);
   border: 1px solid var(--line);
   border-radius: 8px;
 }
 
-.bracketEmpty strong {
+.playoffBracketHeader h4 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.84rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playoffBracketHeader span {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 7px;
   color: var(--ink);
-  font-size: 1.08rem;
+  background: var(--gold);
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 950;
 }
 
-.bracketGrid {
+.playoffBracketMatches {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  align-items: stretch;
+  align-content: start;
+  gap: 8px;
 }
 
-.matchCard {
+.bracketDepth1 .playoffBracketMatches {
+  gap: 28px;
+  padding-top: 44px;
+}
+
+.bracketDepth2 .playoffBracketMatches {
+  gap: 58px;
+  padding-top: 118px;
+}
+
+.bracketDepth3 .playoffBracketMatches {
+  gap: 92px;
+  padding-top: 230px;
+}
+
+.bracketDepth4 .playoffBracketMatches {
+  gap: 120px;
+  padding-top: 360px;
+}
+
+.bracketNode,
+.bracketPending {
+  position: relative;
   display: grid;
-  gap: 12px;
-  grid-template-rows: auto auto 1fr;
-  min-height: 184px;
-  padding: 15px;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
 }
 
-.matchMeta,
-.bracketDetail {
+.playoffBracketColumn:not(.bracketDepth4) .bracketNode::after {
+  position: absolute;
+  top: 50%;
+  right: -15px;
+  width: 14px;
+  border-top: 1px solid var(--line);
+  content: "";
+}
+
+.officialBracketNode {
+  box-shadow: inset 3px 0 0 var(--green), var(--shadow);
+}
+
+.bracketNodeTop {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.matchMeta span:last-child,
-.matchScore {
-  color: var(--ink);
-  background: var(--surface-muted);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 0.74rem;
-  font-weight: 900;
-}
-
-.matchMeta span:last-child {
-  padding: 4px 7px;
-}
-
-.matchScore {
-  justify-self: start;
-  padding: 5px 8px;
-}
-
-.matchRound {
-  color: var(--gold);
-  font-size: 0.78rem;
-  font-weight: 900;
+.bracketNodeTop > span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 950;
   text-transform: uppercase;
 }
 
-.matchTeams {
-  display: grid;
-  gap: 10px;
-  align-content: end;
+.bracketNodeTop div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 5px;
 }
 
-.matchTeam {
+.bracketNodeTop b,
+.bracketNodeTop strong {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 7px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.68rem;
+  font-weight: 950;
+}
+
+.bracketEntrants {
   display: grid;
   gap: 6px;
 }
 
-.apiTeam .matchSeed {
-  color: var(--gold);
+.bracketEntrant {
+  display: grid;
+  grid-template-columns: minmax(28px, 0.18fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  min-height: 32px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
 }
 
-.matchSeed {
+.bracketEntrant:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.bracketEntrant > span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.63rem;
+  font-weight: 950;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+.officialBracketEntrant > span {
+  color: var(--green);
+}
+
+.bracketEntrantTeam {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.bracketEntrantTeam .flag {
+  width: 24px;
+  height: 16px;
+}
+
+.bracketEntrantTeam strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bracketEntrantTeam em {
+  flex: 0 1 auto;
+  max-width: 70px;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--red);
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bracketPending {
+  min-height: 108px;
+  align-content: center;
+  color: var(--muted);
+  background: var(--surface-muted);
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.bracketPending strong {
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+.bracketPending span {
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.playoffListView {
+  display: none;
+}
+
+.playoffRound {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.playoffRoundHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.playoffRoundHeader h3 {
+  margin: 0;
+  font-size: 1.06rem;
+}
+
+.playoffRoundHeader > span,
+.playoffMatchTop b,
+.playoffMatchMeta span,
+.playoffMatchMeta strong {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 8px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.playoffRoundHeader > span {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.playoffMatchList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.playoffMatch {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+  min-height: 188px;
+  padding: 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.officialMatch {
+  box-shadow: inset 3px 0 0 var(--green);
+}
+
+.playoffMatchTop,
+.playoffMatchMeta,
+.playoffTeamIdentity,
+.playoffTeamMeta,
+.playoffOwner {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.playoffMatchTop {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.playoffMatchTop > span {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 900;
   text-transform: uppercase;
 }
 
-.bracketDetail {
+.playoffMatchTop b {
+  flex: 0 0 auto;
   color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.35;
 }
 
-.bracketDetail b {
+.officialMatch .playoffMatchTop b {
+  color: var(--green);
+}
+
+.playoffMatchMeta {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.playoffMatchMeta strong {
+  color: var(--ink);
+}
+
+.playoffMatchTeams {
+  display: grid;
+  gap: 8px;
+}
+
+.playoffEntrant {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.34fr) minmax(0, 1fr);
+  gap: 4px 10px;
+  min-width: 0;
+  padding: 9px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.playoffSeed {
+  grid-row: 1 / span 3;
+  align-self: start;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.69rem;
+  font-weight: 900;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.officialEntrant .playoffSeed {
+  color: var(--green);
+}
+
+.playoffTeamIdentity {
+  gap: 8px;
+}
+
+.playoffTeamIdentity strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.94rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playoffTeamIdentity em {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.playoffTeamMeta {
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.32;
+}
+
+.playoffTeamMeta span,
+.playoffOwner span,
+.playoffPlaceholder span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playoffTeamMeta b {
   flex: 0 0 auto;
   color: var(--ink);
-  font-size: 0.76rem;
+  font-size: 0.72rem;
+}
+
+.playoffOwner {
+  gap: 6px;
+  color: var(--red);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.playoffOwner svg {
+  flex: 0 0 auto;
+}
+
+.playoffPlaceholder {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.playoffPlaceholder strong {
+  color: var(--ink);
 }
 
 .nerdPanel {
@@ -1443,15 +1848,19 @@ footer {
 @media (max-width: 1040px) {
   .leaderGrid,
   .ownersGrid,
-  .bracketGrid,
   .marketHero,
   .marketGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .drawBand,
+  .playoffOverview,
   .nerdPanel {
     grid-template-columns: 1fr;
+  }
+
+  .playoffSummaryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .drawCopy,
@@ -1485,7 +1894,8 @@ footer {
 
   .leaderGrid,
   .ownersGrid,
-  .bracketGrid,
+  .playoffSummaryGrid,
+  .playoffMatchList,
   .nerdColumns,
   .metricGrid,
   .fairnessSummary,
@@ -1494,6 +1904,34 @@ footer {
   .marketGrid,
   .marketSignalGrid {
     grid-template-columns: 1fr;
+  }
+
+  .playoffOverviewCopy {
+    min-height: auto;
+  }
+
+  .playoffBracketView {
+    display: none;
+  }
+
+  .playoffListView {
+    display: grid;
+  }
+
+  .playoffEntrant {
+    grid-template-columns: 1fr;
+  }
+
+  .playoffSeed {
+    grid-row: auto;
+  }
+
+  .playoffTeamMeta {
+    align-items: flex-start;
+  }
+
+  .playoffTeamMeta span {
+    white-space: normal;
   }
 
   .ownerMarketRow {

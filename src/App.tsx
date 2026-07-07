@@ -30,7 +30,7 @@ import { teams, type Team } from "./data/teams";
 import { fetchDrawLedger } from "./services/drawLedger";
 import { fetchLiveState, initialLiveState, type LiveState } from "./services/liveState";
 import { fetchMarketOdds, initialMarketOddsState, type MarketOdd, type MarketOddsState } from "./services/marketOdds";
-import { buildKnockoutBoard, type BracketEntrant } from "./lib/bracket";
+import { buildKnockoutBoard, type BracketEntrant, type KnockoutMatch } from "./lib/bracket";
 import { currentOwnerValues, currentPrizePoolTotal } from "./lib/currentEv";
 import type { Assignment } from "./lib/draw";
 import { computeTeamEvs, type TeamEv } from "./lib/ev";
@@ -766,7 +766,152 @@ function MarketTab({
   );
 }
 
-function BracketTeam({
+type PlayoffRoundGroup = {
+  round: string;
+  matches: KnockoutMatch[];
+};
+
+type BracketRoundGroup = PlayoffRoundGroup & {
+  expectedMatches?: number;
+};
+
+const playoffRoundOrder = ["Round of 32", "Round of 16", "Quarter-final", "Semi-final", "Third place", "Final"];
+const playoffBracketRounds = ["Round of 32", "Round of 16", "Quarter-final", "Semi-final", "Final"];
+const playoffExpectedMatchCounts: Record<string, number> = {
+  "Round of 32": 16,
+  "Round of 16": 8,
+  "Quarter-final": 4,
+  "Semi-final": 2,
+  Final: 1,
+};
+
+function playoffRoundRank(round: string) {
+  const index = playoffRoundOrder.indexOf(round);
+  return index === -1 ? playoffRoundOrder.length : index;
+}
+
+function groupPlayoffMatches(matches: KnockoutMatch[]): PlayoffRoundGroup[] {
+  const byRound = new Map<string, KnockoutMatch[]>();
+
+  matches.forEach((match) => {
+    byRound.set(match.round, [...(byRound.get(match.round) || []), match]);
+  });
+
+  return Array.from(byRound.entries())
+    .sort(([roundA], [roundB]) => playoffRoundRank(roundA) - playoffRoundRank(roundB) || roundA.localeCompare(roundB))
+    .map(([round, roundMatches]) => ({
+      round,
+      matches: [...roundMatches].sort((a, b) => a.matchNumber - b.matchNumber),
+    }));
+}
+
+function buildBracketRoundGroups(groups: PlayoffRoundGroup[]): BracketRoundGroup[] {
+  const byRound = new Map(groups.map((group) => [group.round, group.matches]));
+  const extraRounds = groups
+    .filter((group) => !playoffBracketRounds.includes(group.round))
+    .sort((a, b) => playoffRoundRank(a.round) - playoffRoundRank(b.round) || a.round.localeCompare(b.round))
+    .map((group) => group.round);
+
+  return [...playoffBracketRounds, ...extraRounds].map((round) => ({
+    round,
+    matches: byRound.get(round) || [],
+    expectedMatches: playoffExpectedMatchCounts[round],
+  }));
+}
+
+function bracketDepthClass(round: string) {
+  const bracketIndex = playoffBracketRounds.indexOf(round);
+  return `bracketDepth${Math.max(0, bracketIndex === -1 ? playoffBracketRounds.length - 1 : bracketIndex)}`;
+}
+
+function formatMatchKickoff(value?: string) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  const day = date.toLocaleDateString([], { month: "short", day: "numeric" });
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return `${day} · ${time}`;
+}
+
+function formatStandingRecord(entrant: BracketEntrant) {
+  if (!entrant.standing) return undefined;
+  return `${entrant.standing.won}-${entrant.standing.drawn}-${entrant.standing.lost}`;
+}
+
+function playoffTeamDetail(entrant: BracketEntrant, team: Team) {
+  if (entrant.source === "api") return `${team.confederation} · FIFA ${team.fifaRank}`;
+  return entrant.detail;
+}
+
+function compactEntrantLabel(label: string) {
+  const groupMatch = label.match(/^(Winner|Runner-up) Group ([A-L])$/);
+  if (groupMatch) return `${groupMatch[1] === "Winner" ? "W" : "R"} ${groupMatch[2]}`;
+  if (/^Best 3rd/.test(label)) return "3rd";
+  if (label === "Home") return "H";
+  if (label === "Away") return "A";
+  return label;
+}
+
+function pendingBracketCopy(round: string, hasApiBracket: boolean) {
+  if (hasApiBracket) return `Waiting on official ${round.toLowerCase()} fixtures`;
+  if (round === "Round of 16") return "Projected winners will flow here";
+  return "Path fills once knockout results arrive";
+}
+
+function PlayoffEntrantRow({
+  entrant,
+  assignment,
+  drawStarted,
+}: {
+  entrant: BracketEntrant;
+  assignment?: Assignment;
+  drawStarted: boolean;
+}) {
+  const team = entrant.teamId ? teamById.get(entrant.teamId) : undefined;
+  const record = formatStandingRecord(entrant);
+  const detail = team ? playoffTeamDetail(entrant, team) : entrant.detail;
+
+  return (
+    <div className={entrant.source === "api" ? "playoffEntrant officialEntrant" : "playoffEntrant"}>
+      <span className="playoffSeed">{entrant.label}</span>
+      {team ? (
+        <>
+          <div className="playoffTeamIdentity">
+            <Flag team={team} />
+            <strong>{team.name}</strong>
+            <em>Group {team.group}</em>
+          </div>
+          <div className="playoffTeamMeta">
+            <span>{detail}</span>
+            {record && <b>{record}</b>}
+          </div>
+          <div className="playoffOwner">
+            {drawStarted ? (
+              assignment ? (
+                <>
+                  <UsersRound size={14} />
+                  <span>{assignment.participant}</span>
+                </>
+              ) : (
+                <span className="muted">Unassigned</span>
+              )
+            ) : (
+              <span className="muted">Manager revealed at draw</span>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="playoffPlaceholder">
+          <strong>TBD</strong>
+          <span>{entrant.detail}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlayoffBracketEntrant({
   entrant,
   assignment,
   drawStarted,
@@ -778,25 +923,129 @@ function BracketTeam({
   const team = entrant.teamId ? teamById.get(entrant.teamId) : undefined;
 
   return (
-    <div className={entrant.source === "api" ? "matchTeam apiTeam" : "matchTeam"}>
-      <span className="matchSeed">{entrant.label}</span>
+    <div className={entrant.source === "api" ? "bracketEntrant officialBracketEntrant" : "bracketEntrant"}>
+      <span>{compactEntrantLabel(entrant.label)}</span>
       {team ? (
-        <>
-          <TeamPill team={team} assignment={drawStarted ? assignment : undefined} />
-          <div className="bracketDetail">
-            <span>{entrant.detail}</span>
-            {entrant.standing && (
-              <b>
-                {entrant.standing.won}-{entrant.standing.drawn}-{entrant.standing.lost}
-              </b>
-            )}
-          </div>
-          {drawStarted && <OwnerLine assignment={assignment} />}
-        </>
+        <div className="bracketEntrantTeam">
+          <Flag team={team} />
+          <strong>{team.name}</strong>
+          {drawStarted && assignment && <em>{assignment.participant}</em>}
+        </div>
       ) : (
-        <span className="muted">{entrant.detail}</span>
+        <div className="bracketEntrantTeam">
+          <strong>TBD</strong>
+          <em>{entrant.detail}</em>
+        </div>
       )}
     </div>
+  );
+}
+
+function PlayoffBracketMatch({
+  assignmentByTeam,
+  drawStarted,
+  match,
+}: {
+  assignmentByTeam: Map<Team["id"], Assignment>;
+  drawStarted: boolean;
+  match: KnockoutMatch;
+}) {
+  return (
+    <article className={match.source === "api" ? "bracketNode officialBracketNode" : "bracketNode"}>
+      <div className="bracketNodeTop">
+        <span>{match.slot}</span>
+        <div>
+          {match.status && <b>{match.status}</b>}
+          {match.score && <strong>{match.score}</strong>}
+        </div>
+      </div>
+      <div className="bracketEntrants">
+        {match.entrants.map((entrant, index) => (
+          <PlayoffBracketEntrant
+            assignment={entrant.teamId ? assignmentByTeam.get(entrant.teamId) : undefined}
+            drawStarted={drawStarted}
+            entrant={entrant}
+            key={`${match.matchNumber}-bracket-${entrant.teamId || entrant.label}-${index}`}
+          />
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function PlayoffBracketColumn({
+  assignmentByTeam,
+  drawStarted,
+  group,
+  hasApiBracket,
+}: {
+  assignmentByTeam: Map<Team["id"], Assignment>;
+  drawStarted: boolean;
+  group: BracketRoundGroup;
+  hasApiBracket: boolean;
+}) {
+  return (
+    <section className={`playoffBracketColumn ${bracketDepthClass(group.round)}`}>
+      <div className="playoffBracketHeader">
+        <h4>{group.round}</h4>
+        <span>{group.matches.length || group.expectedMatches || 0}</span>
+      </div>
+      <div className="playoffBracketMatches">
+        {group.matches.length ? (
+          group.matches.map((match) => (
+            <PlayoffBracketMatch
+              assignmentByTeam={assignmentByTeam}
+              drawStarted={drawStarted}
+              key={`bracket-${match.matchNumber}`}
+              match={match}
+            />
+          ))
+        ) : (
+          <div className="bracketPending">
+            <strong>Awaiting matchups</strong>
+            <span>{pendingBracketCopy(group.round, hasApiBracket)}</span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function PlayoffMatchCard({
+  assignmentByTeam,
+  drawStarted,
+  match,
+}: {
+  assignmentByTeam: Map<Team["id"], Assignment>;
+  drawStarted: boolean;
+  match: KnockoutMatch;
+}) {
+  const kickoff = formatMatchKickoff(match.date);
+
+  return (
+    <article className={match.source === "api" ? "playoffMatch officialMatch" : "playoffMatch"}>
+      <div className="playoffMatchTop">
+        <span>{match.slot}</span>
+        <b>{match.source === "api" ? "Official" : "Projected"}</b>
+      </div>
+      {(kickoff || match.status || match.score) && (
+        <div className="playoffMatchMeta">
+          {kickoff && <span>{kickoff}</span>}
+          {match.status && <span>{match.status}</span>}
+          {match.score && <strong>{match.score}</strong>}
+        </div>
+      )}
+      <div className="playoffMatchTeams">
+        {match.entrants.map((entrant, index) => (
+          <PlayoffEntrantRow
+            assignment={entrant.teamId ? assignmentByTeam.get(entrant.teamId) : undefined}
+            drawStarted={drawStarted}
+            entrant={entrant}
+            key={`${match.matchNumber}-${entrant.teamId || entrant.label}-${index}`}
+          />
+        ))}
+      </div>
+    </article>
   );
 }
 
@@ -816,48 +1065,116 @@ function PlayoffsTab({
   const assignmentByTeam = new Map(assignments.map((assignment) => [assignment.team.id, assignment]));
   const board = buildKnockoutBoard(teams, fixtures);
   const hasApiBracket = board.some((match) => match.source === "api");
+  const roundGroups = groupPlayoffMatches(board);
+  const bracketGroups = buildBracketRoundGroups(roundGroups);
+  const entrants = board.flatMap((match) => match.entrants);
+  const teamsInBoard = new Set(entrants.map((entrant) => entrant.teamId).filter(Boolean));
+  const projectedTeamIds = new Set(
+    entrants
+      .filter((entrant) => entrant.source === "projection")
+      .map((entrant) => entrant.teamId)
+      .filter(Boolean),
+  );
+  const officialTeamIds = new Set(
+    entrants
+      .filter((entrant) => entrant.source === "api")
+      .map((entrant) => entrant.teamId)
+      .filter(Boolean),
+  );
+  const ownersInBoard = new Set(
+    entrants
+      .map((entrant) => (entrant.teamId ? assignmentByTeam.get(entrant.teamId)?.participant : undefined))
+      .filter(Boolean),
+  );
+  const completedOrLiveMatches = board.filter((match) => match.score || /live|final/i.test(match.status || "")).length;
+  const summaryStats = [
+    {
+      label: hasApiBracket ? "Published" : "Projected",
+      value: `${board.length}`,
+      detail: hasApiBracket ? `${roundGroups.length} rounds in feed` : "Round of 32 slots",
+    },
+    {
+      label: "Teams",
+      value: `${teamsInBoard.size}`,
+      detail: hasApiBracket ? `${officialTeamIds.size} confirmed teams` : `${projectedTeamIds.size} projected teams`,
+    },
+    {
+      label: "Managers",
+      value: drawStarted ? `${ownersInBoard.size}` : "Hidden",
+      detail: drawStarted ? "with playoff teams" : "until draw starts",
+    },
+    {
+      label: "Scored",
+      value: `${completedOrLiveMatches}`,
+      detail: hasApiBracket ? "live or final matches" : "pending knockout fixtures",
+    },
+  ];
 
   return (
-    <div className="bracketShell">
-      <div className="bracketIntro">
-        <div>
-          <p className="eyebrow">Knockout board</p>
-          <h3>{hasApiBracket ? "Knockout fixtures" : "Playoffs not started yet"}</h3>
+    <div className="playoffShell">
+      <section className="playoffOverview">
+        <div className="playoffOverviewCopy">
+          <p className="eyebrow">Playoff picture</p>
+          <h3>{hasApiBracket ? "Official knockout fixtures" : "Projected Round of 32"}</h3>
+          <p>
+            {hasApiBracket
+              ? "Confirmed fixture data is grouped by round with owners, scores, and kickoff details."
+              : "Current group tables are mapped into the official Round of 32 slots until knockout fixtures publish."}
+          </p>
+          <span>
+            {liveSource} · {formatUpdatedAt(liveUpdatedAt)}
+          </span>
         </div>
-        <span>
-          {liveSource} · {formatUpdatedAt(liveUpdatedAt)}
-        </span>
-      </div>
-      {!hasApiBracket && (
-        <div className="bracketEmpty">
-          <strong>Playoffs not started yet</strong>
-          <span>Knockout fixtures will appear here automatically once the API publishes matchups.</span>
-        </div>
-      )}
-      {hasApiBracket && (
-        <div className="bracketGrid">
-          {board.map((match) => (
-            <article className="matchCard" key={match.matchNumber}>
-              <div className="matchMeta">
-                <span className="matchRound">{match.round}</span>
-                {match.status && <span>{match.status}</span>}
-              </div>
-              <strong>{match.slot}</strong>
-              {match.score && <div className="matchScore">{match.score}</div>}
-              <div className="matchTeams">
-                {match.entrants.map((entrant, index) => (
-                  <BracketTeam
-                    assignment={entrant.teamId ? assignmentByTeam.get(entrant.teamId) : undefined}
-                    drawStarted={drawStarted}
-                    entrant={entrant}
-                    key={`${match.matchNumber}-${entrant.teamId || entrant.label}-${index}`}
-                  />
-                ))}
-              </div>
-            </article>
+        <div className="playoffSummaryGrid">
+          {summaryStats.map((stat) => (
+            <div className="playoffSummaryStat" key={stat.label}>
+              <span>{stat.label}</span>
+              <b>{stat.value}</b>
+              <small>{stat.detail}</small>
+            </div>
           ))}
         </div>
-      )}
+      </section>
+
+      <section className="playoffBracketView" aria-label="Desktop playoff bracket">
+        <div className="playoffBracketScroller">
+          <div className="playoffBracketBoard">
+            {bracketGroups.map((group) => (
+              <PlayoffBracketColumn
+                assignmentByTeam={assignmentByTeam}
+                drawStarted={drawStarted}
+                group={group}
+                hasApiBracket={hasApiBracket}
+                key={`bracket-column-${group.round}`}
+              />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <div className="playoffRounds playoffListView">
+        {roundGroups.map((group) => (
+          <section className="playoffRound" key={group.round}>
+            <div className="playoffRoundHeader">
+              <div>
+                <p className="eyebrow">{hasApiBracket ? "Fixture round" : "Projected bracket"}</p>
+                <h3>{group.round}</h3>
+              </div>
+              <span>{group.matches.length} matches</span>
+            </div>
+            <div className="playoffMatchList">
+              {group.matches.map((match) => (
+                <PlayoffMatchCard
+                  assignmentByTeam={assignmentByTeam}
+                  drawStarted={drawStarted}
+                  key={match.matchNumber}
+                  match={match}
+                />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
     </div>
   );
 }

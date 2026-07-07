@@ -32,6 +32,7 @@ export type KnockoutMatch = {
   slot: string;
   round: string;
   entrants: [BracketEntrant, BracketEntrant];
+  date?: string;
   score?: string;
   status?: string;
   source: "api" | "projection";
@@ -278,6 +279,7 @@ function buildApiKnockout(fixtures: LiveFixture[]): KnockoutMatch[] {
         slot: `Match ${matchNumber}`,
         round: fixture.round,
         entrants,
+        date: fixture.fixture.date,
         score: fixtureScore(fixture.fixture),
         status: fixtureStatus(fixture.fixture),
         source: "api",
